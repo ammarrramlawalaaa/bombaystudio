@@ -26,7 +26,7 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
 
-## Flask App — Event Photo Finder
+## Flask App — Bombay Studio
 
 A standalone Python Flask web app at `flask-app/app.py`.
 

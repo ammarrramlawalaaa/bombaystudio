@@ -1,16 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Your Photos — Results{% endblock %}
-
 {% block content %}
 <div class="container py-4">
-    <div class="section-label">Results</div>
+    <div class="section-label">Search Results</div>
     <h2 class="fw-bold mb-1">Hi, {{ name }}!</h2>
     <p class="text-muted mb-4">
-        We searched all indexed event photos using your selfie.<br>
         {% if count > 0 %}
-        You appear in <strong>{{ count }}</strong> photo{{ 's' if count != 1 else '' }}.
+        You appear in <strong>{{ count }}</strong> event photo{{ 's' if count != 1 else '' }}.
+        Click any photo to view it full size.
         {% else %}
-        No matching photos were found.
+        No matching photos were found for your selfie.
         {% endif %}
     </p>
 
@@ -30,19 +29,14 @@
         </div>
         {% endfor %}
     </div>
-
-    <div class="mt-4 p-3 bg-light rounded small text-muted">
-        <i class="bi bi-info-circle me-1"></i>
-        Click any photo to view it full size in a new tab.
-    </div>
     {% else %}
     <div class="card p-5 text-center text-muted">
-        <i class="bi bi-emoji-frown fs-1 mb-3 d-block"></i>
+        <i class="bi bi-emoji-frown fs-1 mb-3 d-block text-secondary"></i>
         <h5>No matching photos found</h5>
-        <p class="mb-3">This could happen if:<br>
-        — Your face is not clearly visible in the selfie<br>
-        — No photos of you have been uploaded yet<br>
-        — The face couldn't be matched due to lighting or angle differences</p>
+        <p class="mb-3">This can happen if:<br>
+        — Your face isn't clearly visible in the selfie<br>
+        — No event photos of you have been uploaded yet<br>
+        — Lighting or angle differences made matching difficult</p>
         <a href="{{ url_for('guest') }}" class="btn btn-outline-primary">Try Again</a>
     </div>
     {% endif %}

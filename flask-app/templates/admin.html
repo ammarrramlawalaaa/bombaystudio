@@ -1,68 +1,64 @@
 {% extends "base.html" %}
-{% block title %}Admin — Upload Event Photos{% endblock %}
-
-{% block extra_head %}
-<style>
-    .drop-zone {
-        border: 2px dashed #6c757d;
-        border-radius: 12px;
-        padding: 3rem;
-        text-align: center;
-        transition: border-color 0.2s, background-color 0.2s;
-        cursor: pointer;
-        background-color: #fff;
-    }
-    .drop-zone.dragover {
-        border-color: #4f46e5;
-        background-color: #f0f0ff;
-    }
-    .drop-zone input[type="file"] {
-        display: none;
-    }
-</style>
-{% endblock %}
+{% block title %}Admin Panel — Event Photo Finder{% endblock %}
 
 {% block content %}
 <div class="container py-4">
-    <div class="row mb-4">
+    <div class="row mb-4 align-items-center">
         <div class="col">
             <div class="section-label">Admin Panel</div>
-            <h2 class="fw-bold mb-0">Upload Event Photos</h2>
-            <p class="text-muted mt-1">Upload one or multiple photos. Faces will be automatically detected and indexed.</p>
+            <h2 class="fw-bold mb-0">Event Photos</h2>
+            <p class="text-muted mt-1 mb-0">Upload photos in bulk. Faces are detected and indexed automatically.</p>
+        </div>
+        <div class="col-auto d-flex gap-2">
+            <div class="card px-3 py-2 text-center" style="min-width:90px;">
+                <div class="fw-bold fs-4 text-primary">{{ photos|length }}</div>
+                <div class="small text-muted">Photos</div>
+            </div>
+            <div class="card px-3 py-2 text-center" style="min-width:90px;">
+                <div class="fw-bold fs-4 text-success">{{ user_count }}</div>
+                <div class="small text-muted">Users</div>
+            </div>
         </div>
     </div>
 
     <div class="row g-4">
-        <div class="col-lg-5">
+        <!-- Upload panel -->
+        <div class="col-lg-4">
             <div class="card p-4">
-                <h5 class="fw-bold mb-3"><i class="bi bi-cloud-upload me-2 text-primary"></i>Upload Photos</h5>
+                <h5 class="fw-bold mb-3">
+                    <i class="bi bi-cloud-upload me-2 text-primary"></i>Bulk Upload
+                </h5>
                 <form method="post" enctype="multipart/form-data" id="uploadForm">
-                    <div class="drop-zone mb-3" id="dropZone" onclick="document.getElementById('photosInput').click()">
+                    <div class="drop-zone mb-3" id="dropZone"
+                         onclick="document.getElementById('photosInput').click()">
                         <input type="file" name="photos" id="photosInput" multiple accept="image/*">
-                        <div id="dropZoneText">
-                            <i class="bi bi-images fs-1 text-muted d-block mb-2"></i>
+                        <i class="bi bi-images fs-1 text-muted d-block mb-2"></i>
+                        <div id="dropLabel">
                             <strong>Click to browse</strong> or drag &amp; drop<br>
-                            <span class="text-muted small">PNG, JPG, JPEG, GIF, WEBP supported</span>
+                            <span class="text-muted small">PNG, JPG, JPEG, GIF, WEBP &mdash; select as many as you like</span>
                         </div>
-                        <div id="fileList" class="mt-2 small text-muted"></div>
+                        <div id="fileCount" class="mt-2 fw-semibold text-primary d-none"></div>
+                        <ul id="fileList" class="mt-2 list-unstyled text-muted small text-start d-none mb-0"
+                            style="max-height:120px;overflow-y:auto;"></ul>
                     </div>
-                    <button type="submit" class="btn btn-primary w-100 fw-semibold">
+                    <button type="submit" class="btn btn-primary w-100 fw-semibold" id="uploadBtn">
                         <i class="bi bi-cpu me-2"></i>Upload &amp; Index Faces
                     </button>
                 </form>
                 <div class="mt-3 p-3 bg-light rounded small text-muted">
                     <i class="bi bi-info-circle me-1"></i>
-                    Face indexing runs locally using <code>face_recognition</code> and is stored in a local SQLite database.
-                    This may take a moment for large photos.
+                    Re-uploading a file with the same name replaces its previous face data.
+                    Processing may take a moment for large or high-res photos.
                 </div>
             </div>
         </div>
 
-        <div class="col-lg-7">
+        <!-- Photo table -->
+        <div class="col-lg-8">
             <div class="card p-4">
                 <h5 class="fw-bold mb-3">
                     <i class="bi bi-collection me-2 text-primary"></i>Indexed Photos
-                    <span class="badge bg-secondary ms-2">{{ photos|length }}</span>
+                    <span class="badge bg-secondary ms-1">{{ photos|length }}</span>
                 </h5>
                 {% if photos %}
                 <div class="table-responsive">
@@ -79,11 +75,15 @@
                             {% for photo in photos %}
                             <tr>
                                 <td style="width:70px;">
-                                    <img src="{{ url_for('uploaded_file', filename=photo.photo_filename) }}"
-                                         alt="{{ photo.photo_filename }}"
-                                         style="width:60px;height:50px;object-fit:cover;border-radius:6px;">
+                                    <a href="{{ url_for('uploaded_file', filename=photo.photo_filename) }}"
+                                       target="_blank">
+                                        <img src="{{ url_for('uploaded_file', filename=photo.photo_filename) }}"
+                                             alt="{{ photo.photo_filename }}"
+                                             style="width:60px;height:50px;object-fit:cover;border-radius:6px;">
+                                    </a>
                                 </td>
-                                <td class="text-truncate" style="max-width:160px;" title="{{ photo.photo_filename }}">
+                                <td class="text-truncate" style="max-width:200px;"
+                                    title="{{ photo.photo_filename }}">
                                     {{ photo.photo_filename }}
                                 </td>
                                 <td class="text-center">
@@ -94,7 +94,7 @@
                                 <td class="text-end">
                                     <form method="post"
                                           action="{{ url_for('delete_photo', filename=photo.photo_filename) }}"
-                                          onsubmit="return confirm('Delete {{ photo.photo_filename }} and all its face data?')">
+                                          onsubmit="return confirm('Delete {{ photo.photo_filename }}?')">
                                         <button type="submit" class="btn btn-sm btn-outline-danger">
                                             <i class="bi bi-trash"></i>
                                         </button>
@@ -108,7 +108,7 @@
                 {% else %}
                 <div class="text-center py-5 text-muted">
                     <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                    No photos uploaded yet. Upload some photos to get started.
+                    No photos uploaded yet. Use the panel on the left to get started.
                 </div>
                 {% endif %}
             </div>
@@ -121,30 +121,42 @@
 <script>
 const dropZone = document.getElementById('dropZone');
 const photosInput = document.getElementById('photosInput');
+const fileCount = document.getElementById('fileCount');
 const fileList = document.getElementById('fileList');
-const dropZoneText = document.getElementById('dropZoneText');
+const uploadBtn = document.getElementById('uploadBtn');
 
 photosInput.addEventListener('change', updateFileList);
 
 function updateFileList() {
     const files = photosInput.files;
-    if (files.length === 0) {
-        fileList.textContent = '';
+    if (!files.length) {
+        fileCount.classList.add('d-none');
+        fileList.classList.add('d-none');
         return;
     }
-    fileList.textContent = `${files.length} file(s) selected: ` + Array.from(files).map(f => f.name).join(', ');
+    fileCount.textContent = `${files.length} file${files.length > 1 ? 's' : ''} selected`;
+    fileCount.classList.remove('d-none');
+    fileList.innerHTML = '';
+    Array.from(files).forEach(f => {
+        const li = document.createElement('li');
+        li.innerHTML = `<i class="bi bi-image me-1"></i>${f.name}`;
+        fileList.appendChild(li);
+    });
+    fileList.classList.remove('d-none');
 }
 
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-});
+dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
 dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('dragover');
     photosInput.files = e.dataTransfer.files;
     updateFileList();
+});
+
+document.getElementById('uploadForm').addEventListener('submit', () => {
+    uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing…';
+    uploadBtn.disabled = true;
 });
 </script>
 {% endblock %}

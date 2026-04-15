@@ -292,9 +292,11 @@ def admin():
             "SELECT photo_filename, COUNT(*) as face_count "
             "FROM faces GROUP BY photo_filename ORDER BY photo_filename"
         ).fetchall()
-        user_count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        users = conn.execute(
+            "SELECT id, name, email, created_at FROM users ORDER BY created_at DESC"
+        ).fetchall()
 
-    return render_template("admin.html", photos=photos, user_count=user_count)
+    return render_template("admin.html", photos=photos, users=users)
 
 
 @app.route("/admin/delete/<filename>", methods=["POST"])
@@ -352,39 +354,38 @@ def index():
 @app.route("/find-my-photos", methods=["GET", "POST"])
 @login_required
 def guest():
+    searched = False
+    matched = []
+    error_msg = None
+
     if request.method == "POST":
         selfie = request.files.get("selfie")
         if not selfie or not selfie.filename:
-            flash("Please upload a selfie.", "danger")
-            return redirect(request.url)
-        if not allowed_file(selfie.filename):
-            flash("Unsupported image format.", "danger")
-            return redirect(request.url)
+            error_msg = "Please upload a selfie photo."
+        elif not allowed_file(selfie.filename):
+            error_msg = "Unsupported image format. Please use JPG, PNG, or WEBP."
+        else:
+            selfie_bytes = selfie.read()
+            try:
+                result = find_matching_photos(selfie_bytes)
+                if result is None:
+                    error_msg = "No face detected in your selfie. Try a clearer, well-lit frontal photo."
+                else:
+                    matched = result
+                    session["matched_photos"] = matched
+                    searched = True
+            except Exception as e:
+                error_msg = f"Error processing selfie: {str(e)}"
 
-        selfie_bytes = selfie.read()
-        try:
-            matched = find_matching_photos(selfie_bytes)
-        except Exception as e:
-            flash(f"Error processing selfie: {str(e)}", "danger")
-            return redirect(request.url)
-
-        if matched is None:
-            flash("No face detected in your selfie. Try a clearer, well-lit photo.", "warning")
-            return redirect(request.url)
-
-        # Store matched photos in session so the upload route can verify access
-        session["matched_photos"] = matched
-
-        return render_template(
-            "results.html",
-            name=session["user_name"],
-            photos=matched,
-            count=len(matched)
-        )
-
-    return render_template("guest.html",
-                           name=session.get("user_name", ""),
-                           email=session.get("user_email", ""))
+    return render_template(
+        "find_my_photos.html",
+        name=session.get("user_name", ""),
+        email=session.get("user_email", ""),
+        searched=searched,
+        photos=matched,
+        count=len(matched),
+        error_msg=error_msg
+    )
 
 
 # ─── Secure file serving ──────────────────────────────────────────────────────

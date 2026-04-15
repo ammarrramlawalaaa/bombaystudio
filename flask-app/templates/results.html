@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Your Photos — Results{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="section-label">Search Results</div>
+    <h2 class="fw-bold mb-1">Hi, {{ name }}!</h2>
+    <p class="text-muted mb-4">
+        {% if count > 0 %}
+        You appear in <strong>{{ count }}</strong> event photo{{ 's' if count != 1 else '' }}.
+        Click any photo to view it full size.
+        {% else %}
+        No matching photos were found for your selfie.
+        {% endif %}
+    </p>
+
+    {% if count > 0 %}
+    <div class="row g-3">
+        {% for photo in photos %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <div class="card overflow-hidden h-100">
+                <a href="{{ url_for('uploaded_file', filename=photo) }}" target="_blank">
+                    <img src="{{ url_for('uploaded_file', filename=photo) }}"
+                         alt="{{ photo }}" class="photo-thumb">
+                </a>
+                <div class="card-body py-2 px-3">
+                    <p class="mb-0 small text-muted text-truncate" title="{{ photo }}">{{ photo }}</p>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card p-5 text-center text-muted">
+        <i class="bi bi-emoji-frown fs-1 mb-3 d-block text-secondary"></i>
+        <h5>No matching photos found</h5>
+        <p class="mb-3">This can happen if:<br>
+        — Your face isn't clearly visible in the selfie<br>
+        — No event photos of you have been uploaded yet<br>
+        — Lighting or angle differences made matching difficult</p>
+        <a href="{{ url_for('guest') }}" class="btn btn-outline-primary">Try Again</a>
+    </div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a href="{{ url_for('guest') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-arrow-left me-1"></i>Search Again
+        </a>
+        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-house me-1"></i>Home
+        </a>
+    </div>
+</div>
+{% endblock %}

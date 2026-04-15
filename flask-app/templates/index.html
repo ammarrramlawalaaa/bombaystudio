@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Event Photo Finder{% endblock %}
+{% block content %}
+<div class="hero">
+    <div class="container text-center">
+        <h1 class="mb-3"><i class="bi bi-camera2 me-2"></i>Event Photo Finder</h1>
+        <p class="mb-4">Find every photo you appear in at an event — instantly, using face recognition.<br>
+        No cloud. Fully private. Everything stays local.</p>
+        <div class="d-flex justify-content-center gap-3 flex-wrap">
+            {% if session.get('user_id') %}
+                <a href="{{ url_for('guest') }}" class="btn btn-light btn-hero">
+                    <i class="bi bi-search-heart me-2"></i>Find My Photos
+                </a>
+            {% else %}
+                <a href="{{ url_for('register') }}" class="btn btn-light btn-hero">
+                    <i class="bi bi-person-plus me-2"></i>Get Started
+                </a>
+                <a href="{{ url_for('login') }}" class="btn btn-outline-light btn-hero">
+                    <i class="bi bi-box-arrow-in-right me-2"></i>Log In
+                </a>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="container py-5">
+    <div class="row g-4 text-center">
+        <div class="col-md-4">
+            <div class="card h-100 p-4">
+                <div class="mb-3 fs-1 text-primary"><i class="bi bi-upload"></i></div>
+                <h5 class="fw-bold">1. Admin Uploads Photos</h5>
+                <p class="text-muted mb-0">The event organiser logs in as admin and uploads all event photos in bulk. Faces are indexed automatically.</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100 p-4">
+                <div class="mb-3 fs-1 text-primary"><i class="bi bi-person-check"></i></div>
+                <h5 class="fw-bold">2. Guest Registers &amp; Logs In</h5>
+                <p class="text-muted mb-0">Guests create a free account with their name and email, then log in to access the photo finder.</p>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card h-100 p-4">
+                <div class="mb-3 fs-1 text-primary"><i class="bi bi-images"></i></div>
+                <h5 class="fw-bold">3. Upload Selfie, Get Gallery</h5>
+                <p class="text-muted mb-0">Upload a selfie and the app searches all indexed photos for your face — showing only your matching photos.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="text-center mt-5">
+        {% if session.get('user_id') %}
+            <a href="{{ url_for('guest') }}" class="btn btn-primary btn-hero">
+                <i class="bi bi-search-heart me-2"></i>Find My Photos
+            </a>
+        {% else %}
+            <a href="{{ url_for('register') }}" class="btn btn-primary btn-hero">
+                <i class="bi bi-person-plus me-2"></i>Create Account &amp; Get Started
+            </a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

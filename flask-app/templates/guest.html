@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Find My Photos{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width:560px;">
+    <div class="section-label">Guest Portal</div>
+    <h2 class="fw-bold mb-1">Find My Photos</h2>
+    <p class="text-muted mb-4">
+        Hi <strong>{{ name }}</strong>! Upload a clear selfie and we'll find every event photo you appear in.
+    </p>
+
+    <div class="card p-4">
+        <form method="post" enctype="multipart/form-data" id="selfieForm">
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Your Name</label>
+                <input type="text" class="form-control" value="{{ name }}" disabled>
+                <div class="form-text">Logged in as {{ email }}</div>
+            </div>
+
+            <div class="mb-4">
+                <label for="selfie" class="form-label fw-semibold">Upload Your Selfie</label>
+                <input type="file" class="form-control" id="selfie" name="selfie"
+                       accept="image/*" required>
+                <div class="form-text">Use a clear, well-lit frontal photo. JPEG or PNG works best.</div>
+            </div>
+
+            <div id="selfiePreviewWrap" class="mb-4 text-center d-none">
+                <img id="selfiePreview" src="" alt="Selfie preview"
+                     style="max-width:180px;max-height:180px;border-radius:50%;object-fit:cover;
+                            border:3px solid #4f46e5;box-shadow:0 4px 16px rgba(79,70,229,0.2);">
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 fw-semibold py-2" id="searchBtn">
+                <i class="bi bi-search-heart me-2"></i>Search for My Photos
+            </button>
+        </form>
+    </div>
+
+    <div class="text-center mt-4 text-muted small">
+        <i class="bi bi-lock me-1"></i>Your selfie is processed in memory and never saved or shared.
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('selfie').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        document.getElementById('selfiePreview').src = e.target.result;
+        document.getElementById('selfiePreviewWrap').classList.remove('d-none');
+    };
+    reader.readAsDataURL(file);
+});
+document.getElementById('selfieForm').addEventListener('submit', () => {
+    const btn = document.getElementById('searchBtn');
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Searching…';
+    btn.disabled = true;
+});
+</script>
+{% endblock %}

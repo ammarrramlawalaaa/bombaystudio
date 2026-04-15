@@ -3,67 +3,92 @@
 
 {% block extra_head %}
 <style>
-.photo-gallery-card {
-    cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.photo-gallery-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 6px 20px rgba(0,0,0,0.12) !important;
-}
-.user-avatar {
-    width: 38px; height: 38px; border-radius: 50%;
-    background: #4f46e5; color: white;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 0.95rem; flex-shrink: 0;
-}
 .nav-tabs .nav-link { font-weight: 600; color: #6c757d; }
 .nav-tabs .nav-link.active { color: #4f46e5; }
+.photo-gallery-card { transition: transform 0.15s ease, box-shadow 0.15s ease; cursor: pointer; }
+.photo-gallery-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.12) !important; }
+.user-avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+}
+.event-code {
+    font-family: monospace; font-size: 1.3rem; font-weight: 800;
+    letter-spacing: 4px; color: #4f46e5;
+}
+.progress { height: 22px; border-radius: 50px; }
+.progress-bar { border-radius: 50px; transition: width 0.4s ease; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container py-4">
 
-    <!-- Header stats -->
+    <!-- Stats row -->
     <div class="row mb-4 align-items-center">
         <div class="col">
             <div class="section-label">Admin Panel</div>
             <h2 class="fw-bold mb-0">Dashboard</h2>
         </div>
-        <div class="col-auto d-flex gap-2">
-            <div class="card px-3 py-2 text-center" style="min-width:90px;">
-                <div class="fw-bold fs-4 text-primary">{{ photos|length }}</div>
-                <div class="small text-muted">Photos</div>
+        <div class="col-auto d-flex gap-2 flex-wrap">
+            <div class="card px-3 py-2 text-center">
+                <div class="fw-bold fs-5 text-primary">{{ events|length }}</div>
+                <div class="small text-muted">Events</div>
             </div>
-            <div class="card px-3 py-2 text-center" style="min-width:90px;">
-                <div class="fw-bold fs-4 text-success">{{ users|length }}</div>
+            <div class="card px-3 py-2 text-center">
+                <div class="fw-bold fs-5 text-info">{{ photos|length }}</div>
+                <div class="small text-muted">Files</div>
+            </div>
+            <div class="card px-3 py-2 text-center">
+                <div class="fw-bold fs-5 text-success">{{ users|length }}</div>
                 <div class="small text-muted">Users</div>
-            </div>
-            <div class="card px-3 py-2 text-center" style="min-width:90px;">
-                <div class="fw-bold fs-4 text-warning">
-                    {{ photos | sum(attribute='face_count') }}
-                </div>
-                <div class="small text-muted">Faces</div>
             </div>
         </div>
     </div>
 
+    <!-- Progress bar (shown while a job is running) -->
+    {% if current_job and current_job.status == 'running' %}
+    <div class="card p-3 mb-4 border-primary border-opacity-50" id="progressCard">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="fw-semibold">
+                <span class="spinner-border spinner-border-sm text-primary me-2"></span>
+                Indexing in progress…
+            </span>
+            <span class="small text-muted" id="progressText">
+                {{ current_job.done }}/{{ current_job.total }} files
+            </span>
+        </div>
+        <div class="progress">
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                 id="progressBar"
+                 style="width: {{ (100 * current_job.done // current_job.total) if current_job.total else 0 }}%">
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Tabs -->
     <ul class="nav nav-tabs mb-4" id="adminTabs">
         <li class="nav-item">
-            <a class="nav-link active" id="tab-upload" data-bs-toggle="tab" href="#upload" role="tab">
+            <a class="nav-link active" data-bs-toggle="tab" href="#events" role="tab">
+                <i class="bi bi-calendar-event me-1"></i>Events
+                <span class="badge bg-secondary ms-1">{{ events|length }}</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#upload" role="tab" id="tab-upload">
                 <i class="bi bi-cloud-upload me-1"></i>Upload
             </a>
         </li>
         <li class="nav-item">
-            <a class="nav-link" id="tab-gallery" data-bs-toggle="tab" href="#gallery" role="tab">
+            <a class="nav-link" data-bs-toggle="tab" href="#gallery" role="tab">
                 <i class="bi bi-images me-1"></i>All Photos
                 <span class="badge bg-secondary ms-1">{{ photos|length }}</span>
             </a>
         </li>
         <li class="nav-item">
-            <a class="nav-link" id="tab-users" data-bs-toggle="tab" href="#users" role="tab">
+            <a class="nav-link" data-bs-toggle="tab" href="#users" role="tab">
                 <i class="bi bi-people me-1"></i>Users
                 <span class="badge bg-secondary ms-1">{{ users|length }}</span>
             </a>
@@ -72,73 +97,200 @@
 
     <div class="tab-content">
 
-        <!-- ── UPLOAD TAB ─────────────────────────────────────────── -->
-        <div class="tab-pane fade show active" id="upload" role="tabpanel">
+        <!-- ══ EVENTS TAB ══════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade show active" id="events" role="tabpanel">
+            <div class="row g-4">
+                <!-- Create event form -->
+                <div class="col-lg-4">
+                    <div class="card p-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-plus-circle me-2 text-primary"></i>Create New Event
+                        </h5>
+                        <form method="post" action="{{ url_for('create_event') }}">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Event Name</label>
+                                <input type="text" class="form-control" name="name"
+                                       placeholder="e.g. Annual Gala 2025" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Description <span class="text-muted fw-normal">(optional)</span></label>
+                                <textarea class="form-control" name="description" rows="2"
+                                          placeholder="Short description for guests"></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100 fw-semibold">
+                                <i class="bi bi-magic me-2"></i>Create &amp; Generate Code
+                            </button>
+                        </form>
+                        <div class="mt-3 p-3 bg-light rounded small text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            A unique 5-digit code is automatically generated. Share it with guests so they can access their photos.
+                        </div>
+                    </div>
+                </div>
+                <!-- Events list -->
+                <div class="col-lg-8">
+                    <div class="card p-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-list-ul me-2 text-primary"></i>Your Events
+                        </h5>
+                        {% if events %}
+                        <div class="row g-3">
+                            {% for ev in events %}
+                            <div class="col-md-6">
+                                <div class="card border h-100 p-3">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <div>
+                                            <div class="fw-bold">{{ ev.name }}</div>
+                                            {% if ev.description %}
+                                            <div class="text-muted small">{{ ev.description }}</div>
+                                            {% endif %}
+                                            <div class="text-muted small mt-1">
+                                                {{ ev.created_at[:10] if ev.created_at else '' }}
+                                            </div>
+                                        </div>
+                                        <form method="post"
+                                              action="{{ url_for('delete_event', event_id=ev.id) }}"
+                                              onsubmit="return confirm('Delete event \'{{ ev.name }}\' and ALL its photos?')">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                    <div class="mt-auto pt-2 border-top">
+                                        <div class="small text-muted mb-1">Guest Access Code</div>
+                                        <div class="event-code">{{ ev.code }}</div>
+                                        <button class="btn btn-sm btn-outline-secondary mt-1"
+                                                onclick="navigator.clipboard.writeText('{{ ev.code }}');this.innerHTML='<i class=\'bi bi-check\' ></i> Copied!'">
+                                            <i class="bi bi-clipboard me-1"></i>Copy
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-5 text-muted">
+                            <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>
+                            No events yet. Create one on the left.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══ UPLOAD TAB ══════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade" id="upload" role="tabpanel">
+            {% if not events %}
+            <div class="card p-5 text-center text-muted">
+                <i class="bi bi-exclamation-circle fs-1 d-block mb-2 text-warning"></i>
+                <h5>Create an event first</h5>
+                <p>You need at least one event before uploading photos.</p>
+                <a href="#events" class="btn btn-primary" onclick="bootstrap.Tab.getOrCreateInstance(document.querySelector('[href=\'#events\']')).show()">
+                    Go to Events tab
+                </a>
+            </div>
+            {% else %}
             <div class="row g-4">
                 <div class="col-lg-5">
                     <div class="card p-4">
                         <h5 class="fw-bold mb-3">
                             <i class="bi bi-cloud-upload me-2 text-primary"></i>Bulk Upload
                         </h5>
-                        <form method="post" enctype="multipart/form-data" id="uploadForm">
+                        <form method="post" enctype="multipart/form-data" id="uploadForm"
+                              action="{{ url_for('admin') }}">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Select Event</label>
+                                <select class="form-select" name="event_id" required>
+                                    <option value="">— Choose an event —</option>
+                                    {% for ev in events %}
+                                    <option value="{{ ev.id }}">{{ ev.name }} ({{ ev.code }})</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
                             <div class="drop-zone mb-3" id="dropZone"
                                  onclick="document.getElementById('photosInput').click()">
-                                <input type="file" name="photos" id="photosInput" multiple accept="image/*">
+                                <input type="file" name="photos" id="photosInput"
+                                       multiple accept="image/*,video/mp4,video/quicktime">
                                 <i class="bi bi-images fs-1 text-muted d-block mb-2"></i>
                                 <div id="dropLabel">
                                     <strong>Click to browse</strong> or drag &amp; drop<br>
-                                    <span class="text-muted small">PNG, JPG, JPEG, GIF, WEBP &mdash; select as many as you like</span>
+                                    <span class="text-muted small">Photos: JPG, PNG, WEBP &nbsp;|&nbsp; Videos: MP4, MOV</span>
                                 </div>
                                 <div id="fileCount" class="mt-2 fw-semibold text-primary d-none"></div>
                                 <ul id="fileList" class="mt-2 list-unstyled text-muted small text-start d-none mb-0"
-                                    style="max-height:140px;overflow-y:auto;"></ul>
+                                    style="max-height:130px;overflow-y:auto;"></ul>
                             </div>
                             <button type="submit" class="btn btn-primary w-100 fw-semibold" id="uploadBtn">
-                                <i class="bi bi-cpu me-2"></i>Upload &amp; Index Faces
+                                <i class="bi bi-cpu me-2"></i>Upload &amp; Index (Background)
                             </button>
                         </form>
                         <div class="mt-3 p-3 bg-light rounded small text-muted">
                             <i class="bi bi-info-circle me-1"></i>
-                            Re-uploading a file with the same name replaces its previous face data. Processing may take a moment for large photos.
+                            Already-indexed files are skipped automatically. Videos are sampled at 1 frame/second. Processing runs in the background — you can navigate freely.
                         </div>
                     </div>
                 </div>
                 <div class="col-lg-7">
-                    <div class="card p-4">
+                    <!-- Live progress -->
+                    <div class="card p-4" id="liveJobCard" style="display:none!important;">
                         <h5 class="fw-bold mb-3">
-                            <i class="bi bi-list-ul me-2 text-primary"></i>Indexed Photos
+                            <i class="bi bi-activity me-2 text-primary"></i>Indexing Progress
                         </h5>
-                        {% if photos %}
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span id="jobStatusText" class="text-muted small">Starting…</span>
+                            <span id="jobCountText" class="fw-semibold small"></span>
+                        </div>
+                        <div class="progress mb-3">
+                            <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                                 id="jobBar" style="width:0%">0%</div>
+                        </div>
+                        <ul id="jobErrors" class="list-unstyled small text-danger mb-0"></ul>
+                    </div>
+                    <!-- File summary for this event -->
+                    {% if photos %}
+                    <div class="card p-4 mt-3">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-list-ul me-2 text-primary"></i>Indexed Files
+                        </h5>
+                        <div class="table-responsive" style="max-height:360px;overflow-y:auto;">
+                            <table class="table table-sm table-hover align-middle mb-0">
+                                <thead class="table-light sticky-top">
                                     <tr>
                                         <th>Preview</th>
-                                        <th>Filename</th>
+                                        <th>File</th>
+                                        <th>Event</th>
                                         <th class="text-center">Faces</th>
                                         <th></th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {% for photo in photos %}
+                                    {% for p in photos %}
                                     <tr>
-                                        <td style="width:70px;">
-                                            <a href="{{ url_for('uploaded_file', filename=photo.photo_filename) }}" target="_blank">
-                                                <img src="{{ url_for('uploaded_file', filename=photo.photo_filename) }}"
-                                                     style="width:60px;height:50px;object-fit:cover;border-radius:6px;">
+                                        <td style="width:60px;">
+                                            {% if p.media_type == 'video' %}
+                                            <div style="width:50px;height:40px;background:#222;border-radius:6px;display:flex;align-items:center;justify-content:center;">
+                                                <i class="bi bi-camera-video text-white"></i>
+                                            </div>
+                                            {% else %}
+                                            <a href="{{ url_for('uploaded_file', filename=p.photo_filename) }}" target="_blank">
+                                                <img src="{{ url_for('uploaded_file', filename=p.photo_filename) }}"
+                                                     style="width:50px;height:40px;object-fit:cover;border-radius:6px;">
                                             </a>
+                                            {% endif %}
                                         </td>
-                                        <td class="text-truncate" style="max-width:200px;" title="{{ photo.photo_filename }}">
-                                            {{ photo.photo_filename }}
+                                        <td class="text-truncate" style="max-width:160px;" title="{{ p.photo_filename }}">
+                                            {{ p.photo_filename }}
                                         </td>
+                                        <td class="small text-muted">{{ p.event_name or '—' }}</td>
                                         <td class="text-center">
-                                            <span class="face-badge"><i class="bi bi-person me-1"></i>{{ photo.face_count }}</span>
+                                            <span class="face-badge"><i class="bi bi-person me-1"></i>{{ p.face_count }}</span>
                                         </td>
-                                        <td class="text-end">
-                                            <form method="post"
-                                                  action="{{ url_for('delete_photo', filename=photo.photo_filename) }}"
-                                                  onsubmit="return confirm('Delete {{ photo.photo_filename }}?')">
-                                                <button type="submit" class="btn btn-sm btn-outline-danger">
+                                        <td>
+                                            <form method="post" action="{{ url_for('delete_photo', filename=p.photo_filename) }}"
+                                                  onsubmit="return confirm('Delete {{ p.photo_filename }}?')">
+                                                <input type="hidden" name="event_id" value="{{ p.event_id }}">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
                                                     <i class="bi bi-trash"></i>
                                                 </button>
                                             </form>
@@ -148,43 +300,52 @@
                                 </tbody>
                             </table>
                         </div>
-                        {% else %}
-                        <div class="text-center py-5 text-muted">
-                            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                            No photos uploaded yet.
-                        </div>
-                        {% endif %}
                     </div>
+                    {% endif %}
                 </div>
             </div>
+            {% endif %}
         </div>
 
-        <!-- ── ALL PHOTOS GALLERY TAB ─────────────────────────────── -->
+        <!-- ══ GALLERY TAB ════════════════════════════════════════════════════ -->
         <div class="tab-pane fade" id="gallery" role="tabpanel">
             {% if photos %}
-            <div class="mb-3 d-flex align-items-center justify-content-between">
-                <span class="text-muted small">{{ photos|length }} photo(s) indexed — click any photo to view full size</span>
+            <div class="mb-3 d-flex gap-2 align-items-center flex-wrap">
+                <span class="text-muted small me-auto">{{ photos|length }} file(s)</span>
+                <select class="form-select form-select-sm w-auto" id="eventFilter">
+                    <option value="">All Events</option>
+                    {% for ev in events %}
+                    <option value="{{ ev.id }}">{{ ev.name }}</option>
+                    {% endfor %}
+                </select>
                 <input type="text" class="form-control form-control-sm w-auto" id="gallerySearch"
-                       placeholder="Search filename…" style="min-width:200px;">
+                       placeholder="Search filename…" style="min-width:180px;">
             </div>
             <div class="row g-3" id="galleryGrid">
-                {% for photo in photos %}
-                <div class="col-6 col-md-4 col-lg-3 gallery-item" data-name="{{ photo.photo_filename|lower }}">
+                {% for p in photos %}
+                <div class="col-6 col-md-4 col-lg-3 gallery-item"
+                     data-name="{{ p.photo_filename|lower }}"
+                     data-event="{{ p.event_id }}">
                     <div class="card overflow-hidden photo-gallery-card">
-                        <a href="{{ url_for('uploaded_file', filename=photo.photo_filename) }}" target="_blank"
+                        {% if p.media_type == 'video' %}
+                        <div style="aspect-ratio:4/3;background:#111;display:flex;align-items:center;justify-content:center;">
+                            <i class="bi bi-camera-video text-white fs-1"></i>
+                        </div>
+                        {% else %}
+                        <a href="{{ url_for('uploaded_file', filename=p.photo_filename) }}" target="_blank"
                            style="display:block;aspect-ratio:4/3;overflow:hidden;">
-                            <img src="{{ url_for('uploaded_file', filename=photo.photo_filename) }}"
-                                 alt="{{ photo.photo_filename }}"
+                            <img src="{{ url_for('uploaded_file', filename=p.photo_filename) }}"
                                  style="width:100%;height:100%;object-fit:cover;">
                         </a>
-                        <div class="card-body py-2 px-3 d-flex align-items-center justify-content-between">
-                            <p class="mb-0 small text-muted text-truncate me-2" style="max-width:130px;"
-                               title="{{ photo.photo_filename }}">{{ photo.photo_filename }}</p>
-                            <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                                <span class="face-badge"><i class="bi bi-person"></i> {{ photo.face_count }}</span>
-                                <form method="post"
-                                      action="{{ url_for('delete_photo', filename=photo.photo_filename) }}"
-                                      onsubmit="return confirm('Delete {{ photo.photo_filename }}?')">
+                        {% endif %}
+                        <div class="card-body py-2 px-2">
+                            <p class="mb-1 small text-truncate" title="{{ p.photo_filename }}">{{ p.photo_filename }}</p>
+                            <div class="d-flex align-items-center justify-content-between">
+                                <span class="face-badge small"><i class="bi bi-person"></i> {{ p.face_count }}</span>
+                                <span class="badge bg-light text-muted small">{{ p.event_name or '—' }}</span>
+                                <form method="post" action="{{ url_for('delete_photo', filename=p.photo_filename) }}"
+                                      onsubmit="return confirm('Delete?')">
+                                    <input type="hidden" name="event_id" value="{{ p.event_id }}">
                                     <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
                                         <i class="bi bi-trash"></i>
                                     </button>
@@ -199,22 +360,22 @@
             <div class="card p-5 text-center text-muted">
                 <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                 <h5>No photos yet</h5>
-                <p class="mb-0">Go to the <strong>Upload</strong> tab to add event photos.</p>
+                <p class="mb-0">Upload photos in the <strong>Upload</strong> tab.</p>
             </div>
             {% endif %}
         </div>
 
-        <!-- ── USERS TAB ──────────────────────────────────────────── -->
+        <!-- ══ USERS TAB ══════════════════════════════════════════════════════ -->
         <div class="tab-pane fade" id="users" role="tabpanel">
             {% if users %}
-            <div class="mb-3 d-flex align-items-center justify-content-between">
-                <span class="text-muted small">{{ users|length }} registered user(s)</span>
+            <div class="mb-3 d-flex align-items-center gap-2">
+                <span class="text-muted small me-auto">{{ users|length }} registered user(s)</span>
                 <input type="text" class="form-control form-control-sm w-auto" id="userSearch"
-                       placeholder="Search name or email…" style="min-width:220px;">
+                       placeholder="Search…" style="min-width:220px;">
             </div>
             <div class="card">
                 <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0" id="usersTable">
+                    <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th>#</th>
@@ -224,20 +385,17 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {% for user in users %}
-                            <tr class="user-row"
-                                data-search="{{ user.name|lower }} {{ user.email|lower }}">
+                            {% for u in users %}
+                            <tr class="user-row" data-search="{{ u.name|lower }} {{ u.email|lower }}">
                                 <td class="text-muted small">{{ loop.index }}</td>
                                 <td>
                                     <div class="d-flex align-items-center gap-2">
-                                        <div class="user-avatar">{{ user.name[0]|upper }}</div>
-                                        <span class="fw-semibold">{{ user.name }}</span>
+                                        <div class="user-avatar">{{ u.name[0]|upper }}</div>
+                                        <span class="fw-semibold">{{ u.name }}</span>
                                     </div>
                                 </td>
-                                <td class="text-muted">{{ user.email }}</td>
-                                <td class="text-muted small">
-                                    {{ user.created_at[:10] if user.created_at else '—' }}
-                                </td>
+                                <td class="text-muted">{{ u.email }}</td>
+                                <td class="text-muted small">{{ u.created_at[:10] if u.created_at else '—' }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -248,66 +406,99 @@
             <div class="card p-5 text-center text-muted">
                 <i class="bi bi-people fs-1 d-block mb-2"></i>
                 <h5>No users registered yet</h5>
-                <p class="mb-0">Users will appear here once they create an account.</p>
             </div>
             {% endif %}
         </div>
 
-    </div>
+    </div><!-- /tab-content -->
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// ── Drag & drop upload ──────────────────────────────────
-const dropZone = document.getElementById('dropZone');
-const photosInput = document.getElementById('photosInput');
-const fileCount = document.getElementById('fileCount');
-const fileList = document.getElementById('fileList');
-const uploadBtn = document.getElementById('uploadBtn');
+// ── Drag & drop ─────────────────────────────────────────────────────────
+const dropZone     = document.getElementById('dropZone');
+const photosInput  = document.getElementById('photosInput');
+const fileCountEl  = document.getElementById('fileCount');
+const fileListEl   = document.getElementById('fileList');
+const uploadBtn    = document.getElementById('uploadBtn');
 
 if (photosInput) {
     photosInput.addEventListener('change', updateFileList);
-
     function updateFileList() {
         const files = photosInput.files;
-        if (!files.length) { fileCount.classList.add('d-none'); fileList.classList.add('d-none'); return; }
-        fileCount.textContent = `${files.length} file${files.length > 1 ? 's' : ''} selected`;
-        fileCount.classList.remove('d-none');
-        fileList.innerHTML = '';
+        if (!files.length) { fileCountEl.classList.add('d-none'); fileListEl.classList.add('d-none'); return; }
+        fileCountEl.textContent = `${files.length} file${files.length > 1 ? 's' : ''} selected`;
+        fileCountEl.classList.remove('d-none');
+        fileListEl.innerHTML = '';
         Array.from(files).forEach(f => {
             const li = document.createElement('li');
-            li.innerHTML = `<i class="bi bi-image me-1"></i>${f.name}`;
-            fileList.appendChild(li);
+            const icon = f.type.startsWith('video') ? 'bi-camera-video' : 'bi-image';
+            li.innerHTML = `<i class="bi ${icon} me-1"></i>${f.name}`;
+            fileListEl.appendChild(li);
         });
-        fileList.classList.remove('d-none');
+        fileListEl.classList.remove('d-none');
     }
-
     dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
     dropZone.addEventListener('drop', e => {
         e.preventDefault(); dropZone.classList.remove('dragover');
         photosInput.files = e.dataTransfer.files; updateFileList();
     });
-
     document.getElementById('uploadForm').addEventListener('submit', () => {
-        uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing…';
-        uploadBtn.disabled = true;
+        if (uploadBtn) { uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading…'; uploadBtn.disabled = true; }
     });
 }
 
-// ── Gallery search ──────────────────────────────────────
+// ── Live progress polling ────────────────────────────────────────────────
+const JOB_ID = "{{ job_id or '' }}";
+const liveCard = document.getElementById('liveJobCard');
+const jobBar   = document.getElementById('jobBar');
+const jobText  = document.getElementById('jobStatusText');
+const jobCount = document.getElementById('jobCountText');
+const jobErr   = document.getElementById('jobErrors');
+
+function pollProgress() {
+    if (!JOB_ID) return;
+    fetch(`/admin/status?job_id=${JOB_ID}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'idle') return;
+            if (liveCard) liveCard.style.removeProperty('display');
+            const pct = data.percent || 0;
+            if (jobBar) { jobBar.style.width = pct + '%'; jobBar.textContent = pct + '%'; }
+            if (jobText) jobText.textContent = data.status === 'complete' ? '✅ Done!' : 'Indexing…';
+            if (jobCount) jobCount.textContent = `${data.done}/${data.total} files`;
+            if (jobErr && data.errors && data.errors.length) {
+                jobErr.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
+            }
+            if (data.status !== 'complete') {
+                setTimeout(pollProgress, 1500);
+            } else {
+                // Remove striped animation when done
+                if (jobBar) { jobBar.classList.remove('progress-bar-striped', 'progress-bar-animated'); jobBar.classList.add('bg-success'); }
+            }
+        })
+        .catch(() => setTimeout(pollProgress, 3000));
+}
+if (JOB_ID) pollProgress();
+
+// ── Gallery filter + search ──────────────────────────────────────────────
 const gallerySearch = document.getElementById('gallerySearch');
-if (gallerySearch) {
-    gallerySearch.addEventListener('input', function() {
-        const q = this.value.toLowerCase();
-        document.querySelectorAll('.gallery-item').forEach(el => {
-            el.style.display = el.dataset.name.includes(q) ? '' : 'none';
-        });
+const eventFilter   = document.getElementById('eventFilter');
+function filterGallery() {
+    const q  = (gallerySearch ? gallerySearch.value.toLowerCase() : '');
+    const ev = (eventFilter   ? eventFilter.value : '');
+    document.querySelectorAll('.gallery-item').forEach(el => {
+        const nameMatch  = el.dataset.name.includes(q);
+        const eventMatch = !ev || el.dataset.event === ev;
+        el.style.display = (nameMatch && eventMatch) ? '' : 'none';
     });
 }
+if (gallerySearch) gallerySearch.addEventListener('input', filterGallery);
+if (eventFilter)   eventFilter.addEventListener('change', filterGallery);
 
-// ── User search ─────────────────────────────────────────
+// ── User search ──────────────────────────────────────────────────────────
 const userSearch = document.getElementById('userSearch');
 if (userSearch) {
     userSearch.addEventListener('input', function() {
@@ -318,14 +509,22 @@ if (userSearch) {
     });
 }
 
-// ── Keep active tab after page reload (flash redirect) ──
+// ── Persist active tab ───────────────────────────────────────────────────
+const hash = window.location.hash;
+if (hash) {
+    const trigger = document.querySelector(`[href="${hash}"]`);
+    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+}
 const savedTab = sessionStorage.getItem('adminTab');
-if (savedTab) {
+if (!hash && savedTab) {
     const trigger = document.querySelector(`[href="${savedTab}"]`);
     if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
 }
 document.querySelectorAll('#adminTabs .nav-link').forEach(el => {
-    el.addEventListener('shown.bs.tab', e => sessionStorage.setItem('adminTab', e.target.getAttribute('href')));
+    el.addEventListener('shown.bs.tab', e => {
+        sessionStorage.setItem('adminTab', e.target.getAttribute('href'));
+        history.replaceState(null, '', e.target.getAttribute('href'));
+    });
 });
 </script>
 {% endblock %}

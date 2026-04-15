@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Admin Panel — Event Photo Finder{% endblock %}
+{% block title %}Admin Panel — Bombay Studio{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -54,6 +54,12 @@
             <span class="fw-semibold">
                 <span class="spinner-border spinner-border-sm text-primary me-2"></span>
                 Indexing in progress…
+                {% if current_job.processed %}
+                <span class="badge bg-success ms-2">{{ current_job.processed }} processed</span>
+                {% endif %}
+                {% if current_job.skipped %}
+                <span class="badge bg-info ms-1">{{ current_job.skipped }} skipped (resuming)</span>
+                {% endif %}
             </span>
             <span class="small text-muted" id="progressText">
                 {{ current_job.done }}/{{ current_job.total }} files
@@ -63,8 +69,19 @@
             <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
                  id="progressBar"
                  style="width: {{ (100 * current_job.done // current_job.total) if current_job.total else 0 }}%">
+                {{ (100 * current_job.done // current_job.total) if current_job.total else 0 }}%            
             </div>
         </div>
+        {% if current_job.errors %}
+        <div class="mt-2">
+            <div class="small text-warning fw-semibold mb-1">Recent Errors:</div>
+            <ul class="small list-unstyled text-muted" id="jobErrors" style="max-height:120px;overflow-y:auto;">
+                {% for err in current_job.errors %}
+                <li><i class="bi bi-exclamation-circle me-1 text-warning"></i>{{ err }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 
@@ -91,6 +108,11 @@
             <a class="nav-link" data-bs-toggle="tab" href="#users" role="tab">
                 <i class="bi bi-people me-1"></i>Users
                 <span class="badge bg-secondary ms-1">{{ users|length }}</span>
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#watermark" role="tab">
+                <i class="bi bi-shield-lock me-1"></i>Image Protection
             </a>
         </li>
     </ul>
@@ -410,6 +432,88 @@
             {% endif %}
         </div>
 
+        <!-- ══ WATERMARK TAB ══════════════════════════════════════════════════== -->
+        <div class="tab-pane fade" id="watermark" role="tabpanel">
+            <div class="row g-4">
+                <!-- Settings form -->
+                <div class="col-lg-6">
+                    <div class="card p-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-shield-lock me-2 text-primary"></i>Watermark Settings
+                        </h5>
+                        <form method="post" action="/admin/watermark-settings" id="watermarkForm">
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="watermarkEnabled" name="enabled" checked>
+                                    <label class="form-check-label fw-semibold" for="watermarkEnabled">
+                                        Enable Watermarking
+                                    </label>
+                                </div>
+                                <div class="form-text">When enabled, guests see watermarked previews instead of original images.</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Watermark Text</label>
+                                <input type="text" class="form-control" id="watermarkText" name="text" 
+                                       placeholder="Enter watermark text" maxlength="50">
+                                <div class="form-text">Max 50 characters</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Text Size</label>
+                                <div class="input-group">
+                                    <input type="range" class="form-range" id="textSizeSlider" name="text_size" 
+                                           min="20" max="120" onchange="updatePreview()">
+                                    <span class="input-group-text" id="sizeDisplay">60px</span>
+                                </div>
+                                <div class="form-text">20px to 120px</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Opacity</label>
+                                <div class="input-group">
+                                    <input type="range" class="form-range" id="opacitySlider" name="opacity" 
+                                           min="0.1" max="0.8" step="0.1" onchange="updatePreview()">
+                                    <span class="input-group-text" id="opacityDisplay">30%</span>
+                                </div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Placement</label>
+                                <select class="form-select" id="placementSelect" name="placement" onchange="updatePreview()">
+                                    <option value="diagonal">Diagonal (Center)</option>
+                                    <option value="center">Center</option>
+                                    <option value="top_left">Top Left</option>
+                                    <option value="bottom_right">Bottom Right</option>
+                                </select>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary w-100 fw-semibold">
+                                <i class="bi bi-check-circle me-2"></i>Save Settings
+                            </button>
+                        </form>
+                    </div>
+                </div>
+                
+                <!-- Preview -->
+                <div class="col-lg-6">
+                    <div class="card p-4">
+                        <h5 class="fw-bold mb-3">
+                            <i class="bi bi-eye me-2 text-primary"></i>Preview
+                        </h5>
+                        <div class="text-center bg-light rounded p-3" style="min-height:300px;display:flex;align-items:center;justify-content:center;">
+                            <img id="previewImage" src="" alt="Watermark Preview" 
+                                 style="max-width:100%;max-height:400px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
+                        </div>
+                        <div class="mt-3 small text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            This preview shows how watermarks will appear on guest previews. Original high-resolution images are never served to guests.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div><!-- /tab-content -->
 </div>
 {% endblock %}
@@ -452,11 +556,9 @@ if (photosInput) {
 
 // ── Live progress polling ────────────────────────────────────────────────
 const JOB_ID = "{{ job_id or '' }}";
-const liveCard = document.getElementById('liveJobCard');
-const jobBar   = document.getElementById('jobBar');
-const jobText  = document.getElementById('jobStatusText');
-const jobCount = document.getElementById('jobCountText');
-const jobErr   = document.getElementById('jobErrors');
+const progressCard = document.getElementById('progressCard');
+const progressBar = document.getElementById('progressBar');
+const progressText = document.getElementById('progressText');
 
 function pollProgress() {
     if (!JOB_ID) return;
@@ -464,22 +566,56 @@ function pollProgress() {
         .then(r => r.json())
         .then(data => {
             if (data.status === 'idle') return;
-            if (liveCard) liveCard.style.removeProperty('display');
+            
+            // Show progress card if hidden
+            if (progressCard) progressCard.style.removeProperty('display');
+            
             const pct = data.percent || 0;
-            if (jobBar) { jobBar.style.width = pct + '%'; jobBar.textContent = pct + '%'; }
-            if (jobText) jobText.textContent = data.status === 'complete' ? '✅ Done!' : 'Indexing…';
-            if (jobCount) jobCount.textContent = `${data.done}/${data.total} files`;
-            if (jobErr && data.errors && data.errors.length) {
-                jobErr.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
+            const done = data.done || 0;
+            const total = data.total || 1;
+            const processed = data.processed || 0;
+            const skipped = data.skipped || 0;
+            
+            // Update progress bar
+            if (progressBar) {
+                progressBar.style.width = pct + '%';
+                progressBar.textContent = pct + '%';
             }
+            
+            // Update progress text with detailed info
+            if (progressText) {
+                let details = `${done}/${total} files`;
+                if (processed > 0 || skipped > 0) {
+                    details += ` (${processed} processed, ${skipped} skipped)`;
+                }
+                progressText.textContent = details;
+            }
+            
+            // Update errors display if present
+            const jobErr = document.getElementById('jobErrors');
+            if (jobErr && data.errors && data.errors.length) {
+                jobErr.innerHTML = data.errors.map(e => `<li class="small"><i class="bi bi-exclamation-circle me-1 text-warning"></i>${e}</li>`).join('');
+            }
+            
+            // Continue polling or mark as complete
             if (data.status !== 'complete') {
-                setTimeout(pollProgress, 1500);
+                setTimeout(pollProgress, 2000);  // Poll every 2 seconds
             } else {
-                // Remove striped animation when done
-                if (jobBar) { jobBar.classList.remove('progress-bar-striped', 'progress-bar-animated'); jobBar.classList.add('bg-success'); }
+                // Mark as complete
+                if (progressBar) {
+                    progressBar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+                    progressBar.classList.add('bg-success');
+                }
+                if (progressText) {
+                    progressText.innerHTML = '<i class="bi bi-check-circle me-1 text-success"></i>Complete!';
+                }
             }
         })
-        .catch(() => setTimeout(pollProgress, 3000));
+        .catch(err => {
+            console.log('Poll error:', err);
+            // Retry on error
+            if (JOB_ID) setTimeout(pollProgress, 3000);
+        });
 }
 if (JOB_ID) pollProgress();
 
@@ -526,5 +662,75 @@ document.querySelectorAll('#adminTabs .nav-link').forEach(el => {
         history.replaceState(null, '', e.target.getAttribute('href'));
     });
 });
+
+// ── Watermark preview ───────────────────────────────────────────────────
+const watermarkForm = document.getElementById('watermarkForm');
+const previewImage = document.getElementById('previewImage');
+const textSizeSlider = document.getElementById('textSizeSlider');
+const opacitySlider = document.getElementById('opacitySlider');
+const placementSelect = document.getElementById('placementSelect');
+const watermarkText = document.getElementById('watermarkText');
+const sizeDisplay = document.getElementById('sizeDisplay');
+const opacityDisplay = document.getElementById('opacityDisplay');
+const watermarkEnabled = document.getElementById('watermarkEnabled');
+
+// Load saved settings from server on page load
+function loadSavedSettings() {
+    fetch('/admin/watermark-settings')
+        .then(r => r.json())
+        .then(settings => {
+            if (settings) {
+                watermarkEnabled.checked = settings.enabled ?? true;
+                watermarkText.value = settings.text || 'PREVIEW ONLY';
+                textSizeSlider.value = settings.text_size || 60;
+                opacitySlider.value = settings.opacity || 0.3;
+                placementSelect.value = settings.placement || 'diagonal';
+                
+                // Update display
+                sizeDisplay.textContent = textSizeSlider.value + 'px';
+                opacityDisplay.textContent = Math.round(opacitySlider.value * 100) + '%';
+                
+                // Refresh preview
+                updatePreview();
+            }
+        })
+        .catch(e => console.error('Failed to load settings:', e));
+}
+
+function updatePreview() {
+    const formData = new FormData();
+    formData.append('enabled', watermarkEnabled.checked ? 'on' : '');
+    formData.append('text', watermarkText.value || 'PREVIEW ONLY');
+    formData.append('text_size', textSizeSlider.value);
+    formData.append('opacity', opacitySlider.value);
+    formData.append('placement', placementSelect.value);
+    
+    // Update display values
+    sizeDisplay.textContent = textSizeSlider.value + 'px';
+    opacityDisplay.textContent = Math.round(opacitySlider.value * 100) + '%';
+    
+    fetch('/admin/watermark-preview', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.blob())
+    .then(blob => {
+        previewImage.src = URL.createObjectURL(blob);
+    })
+    .catch(e => console.error('Preview error:', e));
+}
+
+// Initial load and event listeners
+if (previewImage && watermarkForm) {
+    loadSavedSettings();
+    
+    // Re-generate preview when any setting changes
+    textSizeSlider?.addEventListener('input', updatePreview);
+    opacitySlider?.addEventListener('input', updatePreview);
+    placementSelect?.addEventListener('change', updatePreview);
+    watermarkText?.addEventListener('input', updatePreview);
+    watermarkEnabled?.addEventListener('change', updatePreview);
+}
+
 </script>
 {% endblock %}

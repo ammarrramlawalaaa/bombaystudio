@@ -109,12 +109,23 @@
 
                     <!-- Step 2: Selfie -->
                     <div class="mb-3 {% if not event %}opacity-50{% endif %}">
-                        <label for="selfie" class="form-label fw-semibold">
+                        <label class="form-label fw-semibold">
                             <span class="badge bg-primary rounded-circle me-1">2</span>
-                            Upload Your Selfie
+                            Get Your Selfie
                         </label>
-                        <input type="file" class="form-control" id="selfie" name="selfie"
-                               accept="image/*" {% if not event %}disabled{% else %}required{% endif %}>
+                        <div class="d-flex gap-2 mb-2">
+                            <button type="button" class="btn btn-outline-primary flex-grow-1 py-2" 
+                                    id="clickSelfieBtn" {% if not event %}disabled{% endif %}
+                                    data-bs-toggle="modal" data-bs-target="#cameraModal">
+                                <i class="bi bi-camera-fill me-2"></i>Click Selfie
+                            </button>
+                            <label class="btn btn-outline-secondary flex-grow-1 py-2 mb-0" 
+                                   id="uploadButtonLabel" {% if not event %}disabled{% endif %}>
+                                <i class="bi bi-upload me-2"></i>Upload Photo
+                                <input type="file" class="d-none" id="selfie" name="selfie"
+                                       accept="image/*" {% if not event %}disabled{% endif %}>
+                            </label>
+                        </div>
                         <div class="form-text">Clear, well-lit frontal photo works best.</div>
                     </div>
 
@@ -123,6 +134,7 @@
                         <img id="selfiePreview" src="" alt="Preview"
                              style="width:110px;height:110px;border-radius:50%;object-fit:cover;
                                     border:3px solid #4f46e5;box-shadow:0 4px 16px rgba(79,70,229,0.2);">
+                        <div class="small text-success mt-1" id="faceValidationMsg"></div>
                     </div>
                     <button type="submit" name="action" value="search"
                             class="btn btn-primary w-100 fw-semibold py-2" id="searchBtn">
@@ -184,13 +196,15 @@
                                    id="chk_{{ loop.index }}"
                                    onchange="updateBasket()">
                             <div class="photo-card-inner" id="card_{{ loop.index }}">
-                                <a href="{{ url_for('uploaded_file', filename=photo) }}" target="_blank"
+                                <a href="#" onclick="openPhotoModal('{{ photo }}'); return false;"
                                    style="display:block;aspect-ratio:4/3;overflow:hidden;">
                                     <img src="{{ url_for('uploaded_file', filename=photo) }}"
                                          alt="{{ photo }}"
                                          style="width:100%;height:100%;object-fit:cover;transition:transform 0.2s;"
                                          onmouseover="this.style.transform='scale(1.05)'"
-                                         onmouseout="this.style.transform='scale(1)'">
+                                         onmouseout="this.style.transform='scale(1)'"
+                                         oncontextmenu="return false;"
+                                         draggable="false">
                                 </a>
                                 <div class="px-2 py-1">
                                     <p class="mb-0 small text-muted text-truncate" title="{{ photo }}">{{ photo }}</p>
@@ -207,6 +221,31 @@
     </div>
 </div>
 
+<!-- ── Photo Lightbox Modal ─────────────────────────────────────────── -->
+<div class="modal fade" id="photoModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content bg-dark">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title fw-bold text-white" id="photoModalTitle"></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body d-flex align-items-center justify-content-center p-2">
+                <img id="photoModalImage" src="" alt="" 
+                     style="max-width:100%;max-height:70vh;border-radius:8px;"
+                     oncontextmenu="return false;"
+                     draggable="false">
+            </div>
+            <div class="modal-footer border-top border-secondary">
+                <small class="text-muted">
+                    <i class="bi bi-lock-fill me-1"></i>
+                    This is a preview-only version. Original photo is protected.
+                </small>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ── Floating Basket ────────────────────────────────────────────────── -->
 <div id="basket" class="hidden">
     <button class="btn btn-dark shadow-lg d-flex align-items-center gap-2 fw-semibold px-4 py-2"
@@ -215,6 +254,59 @@
         Request Selected
         <span class="badge bg-warning text-dark" id="basketCount">0</span>
     </button>
+</div>
+
+<!-- ── Camera Modal ──────────────────────────────────────────────────── -->
+<div class="modal fade" id="cameraModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold">
+                    <i class="bi bi-camera-fill text-primary me-2"></i>Take a Selfie
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" id="cameraCloseBtn"></button>
+            </div>
+            <div class="modal-body">
+                <div id="cameraStep" class="d-block">
+                    <div style="position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:10px;overflow:hidden;margin-bottom:1rem;">
+                        <video id="cameraVideo" 
+                               style="width:100%;height:100%;object-fit:cover;display:block;"
+                               autoplay playsinline muted></video>
+                        <canvas id="cameraCanvas" style="display:none;"></canvas>
+                    </div>
+                    <div class="text-center text-muted small mb-3">
+                        <i class="bi bi-exclamation-circle me-1"></i>Position your face in the center
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary w-100" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary w-100 fw-semibold" id="captureBtn">
+                            <i class="bi bi-camera-fill me-2"></i>Capture
+                        </button>
+                    </div>
+                </div>
+
+                <div id="validationStep" class="d-none">
+                    <div class="text-center">
+                        <div style="margin-bottom:1.5rem;min-height:250px;display:flex;align-items:center;justify-content:center;background:#f8f9fa;border-radius:10px;">
+                            <img id="capturedPreview" src="" alt="Captured" 
+                                 style="max-width:100%;max-height:250px;border-radius:8px;">
+                        </div>
+                        <div id="validationAlert" class="alert mb-3" style="display:none;">
+                            <i class="bi me-2" id="validationIcon"></i>
+                            <span id="validationText"></span>
+                        </div>
+                        <div id="validationSpinner" class="spinner-border text-primary mb-3" style="display:none;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0 pt-0" id="cameraFooter">
+                <button type="button" class="btn btn-outline-secondary" id="retryBtn" style="display:none;" data-bs-dismiss="modal">Retry</button>
+                <button type="button" class="btn btn-primary fw-semibold" id="approveSelfieBtn" style="display:none;">
+                    <i class="bi bi-check-circle me-2"></i>Use This Selfie
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- ── Request Modal ──────────────────────────────────────────────────── -->
@@ -265,7 +357,156 @@
 
 {% block extra_js %}
 <script>
-// ── Selfie preview ──────────────────────────────────────────────────────
+// ── Camera functionality ────────────────────────────────────────────────────
+let cameraStream = null;
+let capturedImageData = null;
+
+const cameraModal = document.getElementById('cameraModal');
+const cameraVideo = document.getElementById('cameraVideo');
+const cameraCanvas = document.getElementById('cameraCanvas');
+const captureBtn = document.getElementById('captureBtn');
+const approveSelfieBtn = document.getElementById('approveSelfieBtn');
+const retryBtn = document.getElementById('retryBtn');
+const cameraCloseBtn = document.getElementById('cameraCloseBtn');
+const cameraStep = document.getElementById('cameraStep');
+const validationStep = document.getElementById('validationStep');
+const validationSpinner = document.getElementById('validationSpinner');
+const validationAlert = document.getElementById('validationAlert');
+const validationIcon = document.getElementById('validationIcon');
+const validationText = document.getElementById('validationText');
+const capturedPreview = document.getElementById('capturedPreview');
+const clickSelfieBtn = document.getElementById('clickSelfieBtn');
+
+// Start camera when modal opens
+if (cameraModal) {
+    cameraModal.addEventListener('show.bs.modal', async function() {
+        try {
+            cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+                audio: false
+            });
+            cameraVideo.srcObject = cameraStream;
+        } catch (err) {
+            alert('Unable to access camera. Please check permissions.');
+            console.error('Camera error:', err);
+        }
+    });
+
+    // Stop camera when modal closes
+    cameraModal.addEventListener('hide.bs.modal', function() {
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(track => track.stop());
+            cameraStream = null;
+        }
+        resetCameraModal();
+    });
+}
+
+// Capture image from video
+if (captureBtn) {
+    captureBtn.addEventListener('click', function() {
+        const video = cameraVideo;
+        const canvas = cameraCanvas;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0);
+        const imageData = canvas.toDataURL('image/jpeg', 0.9);
+        capturedImageData = imageData;
+        capturedPreview.src = imageData;
+        
+        // Show validation step
+        cameraStep.classList.add('d-none');
+        validationStep.classList.remove('d-none');
+        validationSpinner.style.display = 'block';
+        validationAlert.style.display = 'none';
+        approveSelfieBtn.style.display = 'none';
+        retryBtn.style.display = 'none';
+        
+        // Validate face
+        validateCapturedImage(imageData);
+    });
+}
+
+// Validate face in captured image
+async function validateCapturedImage(imageData) {
+    try {
+        const response = await fetch('/validate-selfie', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_data: imageData })
+        });
+        const result = await response.json();
+        
+        validationSpinner.style.display = 'none';
+        validationAlert.style.display = 'block';
+        
+        if (result.valid) {
+            validationIcon.className = 'bi bi-check-circle text-success';
+            validationAlert.className = 'alert alert-success mb-3';
+            validationText.textContent = result.message;
+            approveSelfieBtn.style.display = 'block';
+        } else {
+            validationIcon.className = 'bi bi-exclamation-circle text-warning';
+            validationAlert.className = 'alert alert-warning mb-3';
+            validationText.textContent = result.message;
+            retryBtn.style.display = 'block';
+        }
+    } catch (err) {
+        console.error('Validation error:', err);
+        validationSpinner.style.display = 'none';
+        validationAlert.style.display = 'block';
+        validationIcon.className = 'bi bi-exclamation-circle text-danger';
+        validationAlert.className = 'alert alert-danger mb-3';
+        validationText.textContent = 'Error validating image. Please try again.';
+        retryBtn.style.display = 'block';
+    }
+}
+
+// Approve and use selfie
+if (approveSelfieBtn) {
+    approveSelfieBtn.addEventListener('click', function() {
+        if (capturedImageData) {
+            // Convert data URL to File and set it in the input
+            fetch(capturedImageData)
+                .then(res => res.blob())
+                .then(blob => {
+                    const file = new File([blob], 'selfie.jpg', { type: 'image/jpeg' });
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(file);
+                    document.getElementById('selfie').files = dataTransfer.files;
+                    
+                    // Show preview
+                    document.getElementById('selfiePreview').src = capturedImageData;
+                    document.getElementById('selfiePreviewWrap').classList.remove('d-none');
+                    document.getElementById('faceValidationMsg').textContent = '✓ Selfie approved and ready!';
+                    
+                    // Close modal
+                    const modal = bootstrap.Modal.getInstance(cameraModal);
+                    modal.hide();
+                });
+        }
+    });
+}
+
+// Retry button (resets to camera)
+if (retryBtn) {
+    retryBtn.addEventListener('click', function() {
+        resetCameraModal();
+    });
+}
+
+// Reset camera modal to initial state
+function resetCameraModal() {
+    cameraStep.classList.remove('d-none');
+    validationStep.classList.add('d-none');
+    validationSpinner.style.display = 'none';
+    validationAlert.style.display = 'none';
+    approveSelfieBtn.style.display = 'none';
+    retryBtn.style.display = 'none';
+}
+
+// ── Selfie upload/preview ──────────────────────────────────────────────────
 const selfieInput = document.getElementById('selfie');
 if (selfieInput) {
     selfieInput.addEventListener('change', function() {
@@ -275,6 +516,7 @@ if (selfieInput) {
         reader.onload = e => {
             document.getElementById('selfiePreview').src = e.target.result;
             document.getElementById('selfiePreviewWrap').classList.remove('d-none');
+            document.getElementById('faceValidationMsg').textContent = '';
         };
         reader.readAsDataURL(file);
     });
@@ -288,6 +530,16 @@ if (selfieForm) {
             if (btn) { btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Searching…'; btn.disabled = true; }
         }
     });
+}
+
+// ── Photo Lightbox ────────────────────────────────────────────────────
+function openPhotoModal(filename) {
+    const photoModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('photoModal'));
+    const photoUrl = `/uploads/${filename}`;
+    
+    document.getElementById('photoModalImage').src = photoUrl;
+    document.getElementById('photoModalTitle').textContent = filename;
+    photoModal.show();
 }
 
 {% if searched %}

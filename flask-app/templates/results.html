@@ -18,9 +18,16 @@
         {% for photo in photos %}
         <div class="col-6 col-md-4 col-lg-3">
             <div class="card overflow-hidden h-100">
-                <a href="{{ url_for('uploaded_file', filename=photo) }}" target="_blank">
+                <a href="#" onclick="openPhotoModal('{{ photo }}'); return false;"
+                   style="display:block;aspect-ratio:4/3;overflow:hidden;background:#f8f9fa;">
                     <img src="{{ url_for('uploaded_file', filename=photo) }}"
-                         alt="{{ photo }}" class="photo-thumb">
+                         alt="{{ photo }}" 
+                         class="photo-thumb"
+                         style="width:100%;height:100%;object-fit:cover;transition:transform 0.2s;"
+                         onmouseover="this.style.transform='scale(1.05)'"
+                         onmouseout="this.style.transform='scale(1)'"
+                         oncontextmenu="return false;"
+                         draggable="false">
                 </a>
                 <div class="card-body py-2 px-3">
                     <p class="mb-0 small text-muted text-truncate" title="{{ photo }}">{{ photo }}</p>
@@ -28,6 +35,31 @@
             </div>
         </div>
         {% endfor %}
+    </div>
+    
+    <!-- ── Photo Lightbox Modal ─────────────────────────────────────────── -->
+    <div class="modal fade" id="photoModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content bg-dark">
+                <div class="modal-header border-bottom border-secondary">
+                    <h5 class="modal-title fw-bold text-white" id="photoModalTitle"></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body d-flex align-items-center justify-content-center p-2">
+                    <img id="photoModalImage" src="" alt="" 
+                         style="max-width:100%;max-height:70vh;border-radius:8px;"
+                         oncontextmenu="return false;"
+                         draggable="false">
+                </div>
+                <div class="modal-footer border-top border-secondary">
+                    <small class="text-muted">
+                        <i class="bi bi-lock-fill me-1"></i>
+                        This is a preview-only version. Original photo is protected.
+                    </small>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
     </div>
     {% else %}
     <div class="card p-5 text-center text-muted">
@@ -50,4 +82,16 @@
         </a>
     </div>
 </div>
+
+<!-- ── Lightbox JavaScript ──────────────────────────────────────────── -->
+<script>
+function openPhotoModal(filename) {
+    const photoModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('photoModal'));
+    const photoUrl = `/uploads/${filename}`;
+    
+    document.getElementById('photoModalImage').src = photoUrl;
+    document.getElementById('photoModalTitle').textContent = filename;
+    photoModal.show();
+}
+</script>
 {% endblock %}

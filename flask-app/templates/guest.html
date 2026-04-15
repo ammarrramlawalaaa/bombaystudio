@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Find My Photos{% endblock %}
+
+{% block content %}
+<div class="container py-4" style="max-width:560px;">
+    <div class="section-label">Guest Portal</div>
+    <h2 class="fw-bold mb-1">Find My Photos</h2>
+    <p class="text-muted mb-4">Enter your details and upload a selfie — we'll find every photo you appear in from the event.</p>
+
+    <div class="card p-4">
+        <form method="post" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label for="name" class="form-label fw-semibold">Your Name</label>
+                <input type="text" class="form-control" id="name" name="name"
+                       placeholder="Jane Smith" required>
+            </div>
+            <div class="mb-3">
+                <label for="email" class="form-label fw-semibold">Email Address</label>
+                <input type="email" class="form-control" id="email" name="email"
+                       placeholder="jane@example.com" required>
+            </div>
+            <div class="mb-4">
+                <label for="selfie" class="form-label fw-semibold">Upload a Selfie</label>
+                <input type="file" class="form-control" id="selfie" name="selfie"
+                       accept="image/*" required>
+                <div class="form-text">Use a clear, well-lit photo showing your face. JPEG or PNG works best.</div>
+            </div>
+
+            <div id="selfiePreviewWrap" class="mb-3 text-center d-none">
+                <img id="selfiePreview" src="" alt="Selfie preview"
+                     style="max-width:200px;max-height:200px;border-radius:50%;object-fit:cover;border:3px solid #4f46e5;">
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100 fw-semibold py-2">
+                <i class="bi bi-search-heart me-2"></i>Search for My Photos
+            </button>
+        </form>
+    </div>
+
+    <div class="text-center mt-4 text-muted small">
+        <i class="bi bi-lock me-1"></i>Your selfie is processed locally and never stored or shared.
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('selfie').addEventListener('change', function() {
+    const file = this.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        document.getElementById('selfiePreview').src = e.target.result;
+        document.getElementById('selfiePreviewWrap').classList.remove('d-none');
+    };
+    reader.readAsDataURL(file);
+});
+</script>
+{% endblock %}

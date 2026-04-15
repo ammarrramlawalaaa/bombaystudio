@@ -25,3 +25,30 @@ pnpm workspace monorepo using TypeScript. Each package manages its own dependenc
 - `pnpm --filter @workspace/api-server run dev` — run API server locally
 
 See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details.
+
+## Flask App — Event Photo Finder
+
+A standalone Python Flask web app at `flask-app/app.py`.
+
+### Stack
+- **Framework**: Flask 3.x
+- **Face recognition**: `face_recognition` + `dlib`
+- **Image processing**: `opencv-python`, `Pillow`, `numpy`
+- **Database**: SQLite3 (`flask-app/faces.db`)
+- **Frontend**: Jinja2 templates + Bootstrap 5
+- **Photos stored**: `flask-app/uploads/`
+
+### Routes
+- `/` — Landing page
+- `/admin` — Upload event photos & manage indexed photos (POST: process + store faces)
+- `/admin/delete/<filename>` — Remove a photo and its face encodings
+- `/guest` — Guest selfie upload form
+- `/uploads/<filename>` — Serve stored photos
+
+### Key Commands
+- `cd flask-app && python3 app.py` — Run the Flask app (port 5000)
+
+### How it works
+1. Admin uploads photos → `face_recognition` extracts face encodings → stored as BLOBs in SQLite
+2. Guest uploads selfie → encoding extracted → compared against all stored encodings
+3. Matched photos returned as a gallery

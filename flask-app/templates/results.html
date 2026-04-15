@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Your Photos — Results{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="section-label">Results</div>
+    <h2 class="fw-bold mb-1">Hi, {{ name }}!</h2>
+    <p class="text-muted mb-4">
+        We searched all indexed event photos using your selfie.<br>
+        {% if count > 0 %}
+        You appear in <strong>{{ count }}</strong> photo{{ 's' if count != 1 else '' }}.
+        {% else %}
+        No matching photos were found.
+        {% endif %}
+    </p>
+
+    {% if count > 0 %}
+    <div class="row g-3">
+        {% for photo in photos %}
+        <div class="col-6 col-md-4 col-lg-3">
+            <div class="card overflow-hidden h-100">
+                <a href="{{ url_for('uploaded_file', filename=photo) }}" target="_blank">
+                    <img src="{{ url_for('uploaded_file', filename=photo) }}"
+                         alt="{{ photo }}" class="photo-thumb">
+                </a>
+                <div class="card-body py-2 px-3">
+                    <p class="mb-0 small text-muted text-truncate" title="{{ photo }}">{{ photo }}</p>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="mt-4 p-3 bg-light rounded small text-muted">
+        <i class="bi bi-info-circle me-1"></i>
+        Click any photo to view it full size in a new tab.
+    </div>
+    {% else %}
+    <div class="card p-5 text-center text-muted">
+        <i class="bi bi-emoji-frown fs-1 mb-3 d-block"></i>
+        <h5>No matching photos found</h5>
+        <p class="mb-3">This could happen if:<br>
+        — Your face is not clearly visible in the selfie<br>
+        — No photos of you have been uploaded yet<br>
+        — The face couldn't be matched due to lighting or angle differences</p>
+        <a href="{{ url_for('guest') }}" class="btn btn-outline-primary">Try Again</a>
+    </div>
+    {% endif %}
+
+    <div class="mt-4">
+        <a href="{{ url_for('guest') }}" class="btn btn-outline-secondary me-2">
+            <i class="bi bi-arrow-left me-1"></i>Search Again
+        </a>
+        <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-house me-1"></i>Home
+        </a>
+    </div>
+</div>
+{% endblock %}

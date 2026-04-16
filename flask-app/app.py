@@ -163,11 +163,11 @@ def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
     img = pil_img.convert("RGBA")
     w, h = img.size
 
-    text     = (wm.get("text") or "Bombay Studio").strip() or "Bombay Studio"
-    fsize    = max(10, min(200, int(wm.get("font_size", 48))))
-    opacity  = max(0, min(100, int(wm.get("opacity", 60))))
-    position = wm.get("position", "bottom-right")
-    color_hex = wm.get("color", "#ffffff").lstrip("#")
+    text      = (wm.get("text") or "Bombay Studio").strip() or "Bombay Studio"
+    fsize     = max(10, min(200, int(wm.get("font_size", 48))))
+    opacity   = max(0, min(100, int(wm.get("opacity", 60))))
+    position  = wm.get("position", "bottom-right")
+    color_hex = (wm.get("color") or "#ffffff").lstrip("#").ljust(6, "0")
 
     r = int(color_hex[0:2], 16)
     g = int(color_hex[2:4], 16)
@@ -182,6 +182,7 @@ def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     margin = max(16, fsize // 2)
+    pad    = max(6, fsize // 6)   # padding around text for background pill
 
     pos_map = {
         "top-left":      (margin, margin),
@@ -195,20 +196,42 @@ def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
         "bottom-right":  (w - tw - margin, h - th - margin),
     }
     x, y = pos_map.get(position, pos_map["bottom-right"])
+
+    # ── Dark semi-transparent pill behind text ────────────────────────────
+    # Automatically contrasts with any background so text is always readable
+    shadow_a = min(255, int(a * 0.75))
+    draw.rounded_rectangle(
+        [x - pad, y - pad, x + tw + pad, y + th + pad],
+        radius=pad,
+        fill=(0, 0, 0, shadow_a),
+    )
+
+    # ── Shadow offset for extra legibility ────────────────────────────────
+    shadow_offset = max(1, fsize // 24)
+    draw.text((x + shadow_offset, y + shadow_offset), text,
+              font=font, fill=(0, 0, 0, min(255, a)))
+
+    # ── Main text ─────────────────────────────────────────────────────────
     draw.text((x, y), text, font=font, fill=(r, g, b, a))
 
     return Image.alpha_composite(img, overlay).convert("RGB")
 
 
 def serve_image_with_watermark(filepath: str, wm: dict):
-    """Open image, apply watermark, return Flask response."""
+    """Open image, apply watermark if enabled, return response with no-cache headers."""
     img = Image.open(filepath).convert("RGB")
     if wm.get("enabled"):
         img = apply_watermark(img, wm)
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=92)
     buf.seek(0)
-    return send_file(buf, mimetype="image/jpeg")
+    resp = send_file(buf, mimetype="image/jpeg")
+    # Prevent browsers from caching guest images (admin served without watermark
+    # would otherwise be reused from cache on the same URL).
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 # ══════════════════════════════════════════════════════════════════════════════

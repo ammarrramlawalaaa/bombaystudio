@@ -1,32 +1,53 @@
 {% extends "base.html" %}
-{% block title %}Find My Photos{% endblock %}
+{% block title %}Find My Photos — Bombay Studio{% endblock %}
 
 {% block extra_head %}
 <style>
-.photo-check-wrap { position: relative; }
-.photo-checkbox {
+/* Photo cards in results */
+.r-wrap { position: relative; border-radius: 10px; overflow: hidden; }
+.r-card {
+    border-radius: 10px; overflow: hidden; background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    transition: box-shadow 0.15s, transform 0.15s, outline 0.1s;
+}
+.r-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.13); transform: translateY(-2px); }
+/* Album selection mode */
+.album-mode .r-card { cursor: pointer; }
+.album-mode .r-card.album-selected {
+    outline: 3px solid #4f46e5;
+    outline-offset: 0;
+    box-shadow: 0 0 0 5px rgba(79,70,229,0.18);
+}
+.r-tick {
     position: absolute; top: 8px; left: 8px; z-index: 10;
-    width: 22px; height: 22px; cursor: pointer; accent-color: #4f46e5;
+    width: 26px; height: 26px; background: #4f46e5; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 0.85rem;
+    opacity: 0; transition: opacity 0.15s;
+    pointer-events: none;
 }
-.photo-card-inner {
-    border: 2px solid transparent;
-    border-radius: 10px;
-    overflow: hidden;
-    transition: border-color 0.15s, box-shadow 0.15s;
+.album-mode .r-card.album-selected .r-tick { opacity: 1; }
+/* Regular checkbox for request basket */
+.r-cb {
+    position: absolute; top: 8px; left: 8px; z-index: 10;
+    width: 20px; height: 20px; accent-color: #4f46e5;
 }
-.photo-card-inner.selected {
-    border-color: #4f46e5;
-    box-shadow: 0 0 0 3px rgba(79,70,229,0.2);
+/* Floating bars */
+.float-bar {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(140%);
+    z-index: 1055; transition: transform 0.3s ease;
+    background: #1e1e2e; color: #fff; padding: 12px 22px; border-radius: 50px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35);
+    display: flex; align-items: center; gap: 12px; white-space: nowrap;
 }
-/* Floating basket */
-#basket {
-    position: fixed; bottom: 24px; right: 24px; z-index: 1050;
-    transition: transform 0.25s ease, opacity 0.25s ease;
-}
-#basket.hidden { transform: translateY(120%); opacity: 0; pointer-events: none; }
-.event-code-badge {
-    font-family: monospace; font-size: 1.5rem; font-weight: 800;
-    letter-spacing: 4px; color: #4f46e5;
+.float-bar.visible { transform: translateX(-50%) translateY(0); }
+/* Event code badge */
+.event-code-badge { font-family: monospace; font-size: 1.4rem; font-weight: 800; letter-spacing: 4px; color: #4f46e5; }
+/* Already-selected ribbon */
+.ribbon-selected {
+    background: linear-gradient(90deg, #4f46e5, #7c3aed);
+    color: #fff; font-size: 0.7rem; font-weight: 700; letter-spacing: 1px;
+    padding: 2px 10px; position: absolute; top: 0; right: 0; border-bottom-left-radius: 8px; z-index: 5;
 }
 </style>
 {% endblock %}
@@ -57,9 +78,7 @@
         <!-- ── LEFT: Form ──────────────────────────────────────────────── -->
         <div class="col-lg-4">
             <div class="card p-4">
-                <h5 class="fw-bold mb-3">
-                    <i class="bi bi-camera me-2 text-primary"></i>Search Your Photos
-                </h5>
+                <h5 class="fw-bold mb-3"><i class="bi bi-camera me-2 text-primary"></i>Search Your Photos</h5>
 
                 {% if error_msg %}
                 <div class="alert alert-warning py-2 small">
@@ -72,46 +91,49 @@
                     <!-- Step 1: Event code -->
                     <div class="mb-3">
                         <label class="form-label fw-semibold">
-                            <span class="badge bg-primary rounded-circle me-1">1</span>
-                            Event Code
+                            <span class="badge bg-primary rounded-circle me-1">1</span> Event Code
                         </label>
                         {% if event %}
                         <div class="d-flex align-items-center gap-2 p-2 bg-light rounded border">
                             <div class="flex-grow-1">
                                 <div class="fw-bold">{{ event.name }}</div>
                                 <div class="event-code-badge">{{ event.code }}</div>
-                                {% if event.description %}
-                                <div class="text-muted small">{{ event.description }}</div>
+                                {% if event.description %}<div class="text-muted small">{{ event.description }}</div>{% endif %}
+                                {% if event.album_min or event.album_max %}
+                                <div class="small text-muted mt-1">
+                                    Album:
+                                    {% if event.album_min %}min {{ event.album_min }}{% endif %}
+                                    {% if event.album_min and event.album_max %} / {% endif %}
+                                    {% if event.album_max %}max {{ event.album_max }}{% endif %}
+                                    photos
+                                </div>
                                 {% endif %}
                             </div>
                             <button type="submit" name="action" value="set_event"
                                     class="btn btn-sm btn-outline-secondary"
-                                    onclick="document.getElementById('event_code_input').value=''; return true;"
-                                    formnovalidate>
+                                    onclick="document.getElementById('ec_input').value=''" formnovalidate>
                                 <i class="bi bi-x"></i>
                             </button>
                         </div>
                         <input type="hidden" name="event_code" value="{{ event.code }}">
                         {% else %}
                         <div class="input-group">
-                            <input type="text" class="form-control" id="event_code_input"
-                                   name="event_code" placeholder="5-digit code"
-                                   maxlength="5" style="letter-spacing:4px;font-family:monospace;font-size:1.1rem;"
+                            <input type="text" class="form-control" id="ec_input" name="event_code"
+                                   placeholder="5-digit code" maxlength="5"
+                                   style="letter-spacing:4px;font-family:monospace;font-size:1.1rem;"
                                    value="{{ event_code }}" required>
-                            <button type="submit" name="action" value="set_event"
-                                    class="btn btn-outline-primary" formnovalidate>
+                            <button type="submit" name="action" value="set_event" class="btn btn-outline-primary" formnovalidate>
                                 <i class="bi bi-arrow-right"></i>
                             </button>
                         </div>
-                        <div class="form-text">Enter the code shared by the event organiser.</div>
+                        <div class="form-text">Enter the code shared by your event organiser.</div>
                         {% endif %}
                     </div>
 
                     <!-- Step 2: Selfie -->
                     <div class="mb-3 {% if not event %}opacity-50{% endif %}">
                         <label for="selfie" class="form-label fw-semibold">
-                            <span class="badge bg-primary rounded-circle me-1">2</span>
-                            Upload Your Selfie
+                            <span class="badge bg-primary rounded-circle me-1">2</span> Upload Your Selfie
                         </label>
                         <input type="file" class="form-control" id="selfie" name="selfie"
                                accept="image/*" {% if not event %}disabled{% else %}required{% endif %}>
@@ -120,9 +142,8 @@
 
                     {% if event %}
                     <div id="selfiePreviewWrap" class="mb-3 text-center d-none">
-                        <img id="selfiePreview" src="" alt="Preview"
-                             style="width:110px;height:110px;border-radius:50%;object-fit:cover;
-                                    border:3px solid #4f46e5;box-shadow:0 4px 16px rgba(79,70,229,0.2);">
+                        <img id="selfiePreview" src="" alt="preview"
+                             style="width:100px;height:100px;border-radius:50%;object-fit:cover;border:3px solid #4f46e5;">
                     </div>
                     <button type="submit" name="action" value="search"
                             class="btn btn-primary w-100 fw-semibold py-2" id="searchBtn">
@@ -133,8 +154,27 @@
                 </form>
 
                 <div class="mt-3 p-2 bg-light rounded small text-muted text-center">
-                    <i class="bi bi-lock me-1"></i>Your selfie is never saved or stored.
+                    <i class="bi bi-lock me-1"></i>Your selfie is never saved.
                 </div>
+
+                <!-- Album selection shortcut when already done -->
+                {% if current_album %}
+                <div class="mt-3 p-3 rounded border border-primary border-opacity-25 bg-light">
+                    <div class="fw-semibold small mb-1"><i class="bi bi-collection me-1 text-primary"></i>Your Album</div>
+                    <div class="text-muted small mb-2">{{ current_album|length }} photo(s) selected for your album.</div>
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for f in current_album[:6] %}
+                        <img src="{{ url_for('uploaded_file', filename=f) }}"
+                             style="width:44px;height:36px;object-fit:cover;border-radius:5px;" title="{{ f }}">
+                        {% endfor %}
+                        {% if current_album|length > 6 %}
+                        <div style="width:44px;height:36px;background:#e0e7ff;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:#4f46e5;">
+                            +{{ current_album|length - 6 }}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
 
@@ -145,12 +185,11 @@
                 {% if event %}
                 <i class="bi bi-search-heart fs-1 d-block mb-3 text-primary opacity-50"></i>
                 <h5 class="fw-semibold">Ready to search</h5>
-                <p class="mb-0">Event <strong>{{ event.name }}</strong> is loaded.
-                Upload your selfie and click <strong>Search</strong>.</p>
+                <p class="mb-0">Event <strong>{{ event.name }}</strong> is loaded. Upload your selfie and click Search.</p>
                 {% else %}
                 <i class="bi bi-key fs-1 d-block mb-3 text-warning opacity-75"></i>
                 <h5 class="fw-semibold">Enter your event code</h5>
-                <p class="mb-0">Ask the event organiser for the 5-digit code, enter it on the left, then upload your selfie.</p>
+                <p class="mb-0">Ask the organiser for the 5-digit code, enter it on the left, then upload your selfie.</p>
                 {% endif %}
             </div>
 
@@ -158,34 +197,60 @@
             <div class="card p-5 text-center text-muted h-100 d-flex flex-column justify-content-center">
                 <i class="bi bi-emoji-frown fs-1 d-block mb-3 text-secondary"></i>
                 <h5 class="fw-semibold">No matching photos found</h5>
-                <p class="mb-0">Try a different selfie — ensure your face is clearly visible and well-lit.</p>
+                <p class="mb-0">Try a different selfie — ensure your face is clear and well-lit.</p>
             </div>
 
             {% else %}
-            <!-- Results gallery with checkboxes -->
             <div class="card p-3">
+                <!-- Toolbar -->
                 <div class="d-flex align-items-center justify-content-between mb-3 px-1 flex-wrap gap-2">
                     <h5 class="fw-bold mb-0">
                         <i class="bi bi-images me-2 text-primary"></i>Your Photos
                     </h5>
-                    <div class="d-flex gap-2 align-items-center">
+                    <div class="d-flex gap-2 align-items-center flex-wrap">
+                        <!-- Request basket toggle -->
                         <button class="btn btn-sm btn-outline-secondary" id="selectAllBtn">
                             <i class="bi bi-check-all me-1"></i>Select All
                         </button>
+                        {% if event %}
+                        <!-- Album selection mode toggle -->
+                        <button class="btn btn-sm btn-outline-primary fw-semibold" id="albumModeBtn">
+                            <i class="bi bi-collection me-1"></i>Select for Album
+                        </button>
+                        {% endif %}
                         <span class="text-muted small">{{ count }} found</span>
                     </div>
                 </div>
+
+                <!-- Album mode counter bar -->
+                {% if event and (event.album_min or event.album_max) %}
+                <div id="albumCounter" class="alert alert-info py-2 small mb-3 d-none">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <span id="albumCounterText"></span>
+                    {% if event.album_min %} · Minimum: <strong>{{ event.album_min }}</strong>{% endif %}
+                    {% if event.album_max %} · Maximum: <strong>{{ event.album_max }}</strong>{% endif %}
+                </div>
+                {% endif %}
+
+                <!-- Photo grid -->
                 <div class="row g-2" id="resultsGrid">
                     {% for photo in photos %}
+                    {% set already = photo in current_album %}
                     <div class="col-6 col-md-4">
-                        <div class="photo-check-wrap">
-                            <input type="checkbox" class="photo-checkbox photo-select"
-                                   data-filename="{{ photo }}"
-                                   id="chk_{{ loop.index }}"
-                                   onchange="updateBasket()">
-                            <div class="photo-card-inner" id="card_{{ loop.index }}">
+                        <div class="r-wrap">
+                            <!-- Request basket checkbox (shown in normal mode) -->
+                            <input type="checkbox" class="r-cb basket-cb d-none" id="cb_{{ loop.index }}"
+                                   data-filename="{{ photo }}" onchange="updateBasket()">
+                            <!-- Album tick (shown in album mode) -->
+                            <div class="r-tick"><i class="bi bi-check"></i></div>
+                            {% if already %}<div class="ribbon-selected">In Album</div>{% endif %}
+                            <div class="r-card {% if already %}album-selected{% endif %}"
+                                 id="rcard_{{ loop.index }}"
+                                 data-filename="{{ photo }}"
+                                 data-preselected="{{ 'true' if already else 'false' }}"
+                                 onclick="onCardClick(this, event)">
                                 <a href="{{ url_for('uploaded_file', filename=photo) }}" target="_blank"
-                                   style="display:block;aspect-ratio:4/3;overflow:hidden;">
+                                   class="photo-link" style="display:block;aspect-ratio:4/3;overflow:hidden;">
                                     <img src="{{ url_for('uploaded_file', filename=photo) }}"
                                          alt="{{ photo }}"
                                          style="width:100%;height:100%;object-fit:cover;transition:transform 0.2s;"
@@ -207,49 +272,48 @@
     </div>
 </div>
 
-<!-- ── Floating Basket ────────────────────────────────────────────────── -->
-<div id="basket" class="hidden">
-    <button class="btn btn-dark shadow-lg d-flex align-items-center gap-2 fw-semibold px-4 py-2"
-            data-bs-toggle="modal" data-bs-target="#requestModal" style="border-radius:50px;">
-        <i class="bi bi-bag-fill text-warning"></i>
-        Request Selected
-        <span class="badge bg-warning text-dark" id="basketCount">0</span>
+<!-- ── Floating: Request Basket ──────────────────────────────────────────── -->
+<div class="float-bar" id="basketBar">
+    <i class="bi bi-bag-fill text-warning"></i>
+    <span id="basketCount">0</span> selected
+    <button class="btn btn-sm btn-outline-light" onclick="clearBasket()">Clear</button>
+    <button class="btn btn-sm btn-warning text-dark fw-semibold" data-bs-toggle="modal" data-bs-target="#requestModal">
+        <i class="bi bi-send me-1"></i>Request Photos
     </button>
 </div>
 
-<!-- ── Request Modal ──────────────────────────────────────────────────── -->
+<!-- ── Floating: Album Mode ──────────────────────────────────────────────── -->
+<div class="float-bar" id="albumBar">
+    <i class="bi bi-collection-fill text-info"></i>
+    Album: <strong id="albumCount">0</strong>
+    <span id="albumLimitLabel" class="text-muted small"></span>
+    <button class="btn btn-sm btn-outline-light" onclick="cancelAlbumMode()">Cancel</button>
+    <button class="btn btn-sm btn-success fw-semibold" id="finishAlbumBtn" onclick="finishAlbum()">
+        <i class="bi bi-check-circle me-1"></i>Finish Selection
+    </button>
+</div>
+
+<!-- ── Request Modal ─────────────────────────────────────────────────────── -->
 <div class="modal fade" id="requestModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header border-0 pb-0">
-                <h5 class="modal-title fw-bold">
-                    <i class="bi bi-bag-fill text-primary me-2"></i>Request Selected Photos
-                </h5>
+                <h5 class="modal-title fw-bold"><i class="bi bi-bag-fill text-primary me-2"></i>Request Selected Photos</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <p class="text-muted small mb-3">
-                    You have selected <strong id="modalCount">0</strong> photo(s).
-                    Confirm your details and submit your request.
-                </p>
+                <p class="text-muted small mb-3">You have selected <strong id="modalCount">0</strong> photo(s).</p>
                 <div class="mb-3">
-                    <label class="form-label fw-semibold">Your Name</label>
-                    <input type="text" class="form-control" id="reqName"
-                           value="{{ name }}" readonly>
+                    <label class="form-label fw-semibold">Name</label>
+                    <input type="text" class="form-control" value="{{ name }}" readonly>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label fw-semibold">Your Email</label>
-                    <input type="email" class="form-control" id="reqEmail"
-                           value="{{ email }}" readonly>
+                    <label class="form-label fw-semibold">Email</label>
+                    <input type="email" class="form-control" value="{{ email }}" readonly>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Selected Photos</label>
-                    <ul class="list-group list-group-flush small" id="selectedList"
-                        style="max-height:160px;overflow-y:auto;"></ul>
-                </div>
-                <div class="alert alert-success py-2 small d-none" id="requestSuccess">
-                    <i class="bi bi-check-circle me-1"></i>
-                    Your request has been noted! The organiser will be in touch at <strong>{{ email }}</strong>.
+                <ul class="list-group list-group-flush small mb-0" id="selectedList" style="max-height:160px;overflow-y:auto;"></ul>
+                <div class="alert alert-success py-2 small d-none mt-3" id="requestSuccess">
+                    <i class="bi bi-check-circle me-1"></i>Request noted! The organiser will contact you at <strong>{{ email }}</strong>.
                 </div>
             </div>
             <div class="modal-footer border-0 pt-0">
@@ -261,11 +325,29 @@
         </div>
     </div>
 </div>
+
+<!-- ── Album Success Modal ───────────────────────────────────────────────── -->
+<div class="modal fade" id="albumDoneModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content text-center p-4">
+            <i class="bi bi-check-circle-fill text-success fs-1 mb-2"></i>
+            <h5 class="fw-bold">Album Submitted!</h5>
+            <p class="text-muted small mb-0" id="albumDoneMsg"></p>
+            <button type="button" class="btn btn-primary mt-3" data-bs-dismiss="modal">Done</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// ── Selfie preview ──────────────────────────────────────────────────────
+// ── CONFIG from server ───────────────────────────────────────────────────────
+const EVENT_ID   = {{ event.id if event else 'null' }};
+const ALBUM_MIN  = {{ event.album_min if event else 0 }};
+const ALBUM_MAX  = {{ event.album_max if event else 0 }};
+const PRE_ALBUM  = {{ current_album | tojson }};  // already-selected filenames
+
+// ── Selfie preview ───────────────────────────────────────────────────────────
 const selfieInput = document.getElementById('selfie');
 if (selfieInput) {
     selfieInput.addEventListener('change', function() {
@@ -279,64 +361,73 @@ if (selfieInput) {
         reader.readAsDataURL(file);
     });
 }
-const selfieForm = document.getElementById('selfieForm');
-if (selfieForm) {
-    selfieForm.addEventListener('submit', function(e) {
-        const action = e.submitter?.value;
-        if (action === 'search') {
-            const btn = document.getElementById('searchBtn');
-            if (btn) { btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Searching…'; btn.disabled = true; }
-        }
-    });
-}
+document.getElementById('selfieForm')?.addEventListener('submit', function(e) {
+    if (e.submitter?.value === 'search') {
+        const btn = document.getElementById('searchBtn');
+        if (btn) { btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Searching…'; btn.disabled = true; }
+    }
+});
 
 {% if searched %}
-// Scroll to results on mobile after search
-if (window.innerWidth < 992) {
+if (window.innerWidth < 992)
     document.querySelector('.col-lg-8').scrollIntoView({ behavior: 'smooth', block: 'start' });
-}
 {% endif %}
 
-// ── Selection basket ────────────────────────────────────────────────────
-const basket    = document.getElementById('basket');
-const basketCnt = document.getElementById('basketCount');
-const modalCnt  = document.getElementById('modalCount');
-const selList   = document.getElementById('selectedList');
+// ════════════════════════════════════════════════════════════════════════════
+// MODE MANAGEMENT
+// ════════════════════════════════════════════════════════════════════════════
+let mode = 'normal';   // 'normal' | 'album'
+const grid      = document.getElementById('resultsGrid');
+const basketBar = document.getElementById('basketBar');
+const albumBar  = document.getElementById('albumBar');
+const albumModeBtn = document.getElementById('albumModeBtn');
+
+// ── Normal mode: request basket ─────────────────────────────────────────────
+let basketItems = new Set();
 let allSelected = false;
 
-function updateBasket() {
-    const checked = document.querySelectorAll('.photo-select:checked');
-    const count   = checked.length;
-
-    // Update card border highlights
-    document.querySelectorAll('.photo-select').forEach((cb, i) => {
-        const card = document.getElementById(`card_${i + 1}`);
-        if (card) card.classList.toggle('selected', cb.checked);
+function showCheckboxes(show) {
+    document.querySelectorAll('.basket-cb').forEach(cb => {
+        cb.classList.toggle('d-none', !show);
     });
-
-    // Basket badge
-    if (basketCnt) basketCnt.textContent = count;
-    if (basket)    basket.classList.toggle('hidden', count === 0);
-
-    // Modal list
-    if (selList) {
-        selList.innerHTML = '';
-        checked.forEach(cb => {
-            const li = document.createElement('li');
-            li.className = 'list-group-item py-1 px-0';
-            li.innerHTML = `<i class="bi bi-image me-1 text-muted"></i>${cb.dataset.filename}`;
-            selList.appendChild(li);
-        });
-    }
-    if (modalCnt) modalCnt.textContent = count;
 }
 
-// Select All toggle
+function updateBasket() {
+    document.querySelectorAll('.basket-cb').forEach(cb => {
+        const card = document.getElementById('rcard_' + cb.id.replace('cb_',''));
+        if (cb.checked) basketItems.add(cb.dataset.filename);
+        else            basketItems.delete(cb.dataset.filename);
+    });
+    const count = basketItems.size;
+    document.getElementById('basketCount').textContent = count;
+    basketBar?.classList.toggle('visible', mode === 'normal' && count > 0);
+
+    // Modal list
+    const sl = document.getElementById('selectedList');
+    if (sl) {
+        sl.innerHTML = '';
+        basketItems.forEach(fn => {
+            const li = document.createElement('li');
+            li.className = 'list-group-item py-1 px-0';
+            li.innerHTML = `<i class="bi bi-image me-1 text-muted"></i>${fn}`;
+            sl.appendChild(li);
+        });
+    }
+    const mc = document.getElementById('modalCount');
+    if (mc) mc.textContent = count;
+}
+
+function clearBasket() {
+    basketItems.clear();
+    document.querySelectorAll('.basket-cb').forEach(cb => cb.checked = false);
+    updateBasket();
+}
+
 const selectAllBtn = document.getElementById('selectAllBtn');
 if (selectAllBtn) {
     selectAllBtn.addEventListener('click', () => {
         allSelected = !allSelected;
-        document.querySelectorAll('.photo-select').forEach(cb => { cb.checked = allSelected; });
+        document.querySelectorAll('.basket-cb').forEach(cb => { cb.checked = allSelected; });
         selectAllBtn.innerHTML = allSelected
             ? '<i class="bi bi-x-circle me-1"></i>Deselect All'
             : '<i class="bi bi-check-all me-1"></i>Select All';
@@ -344,17 +435,137 @@ if (selectAllBtn) {
     });
 }
 
-// Submit request (client-side only — logs to console; extend to email/server if needed)
-const submitBtn = document.getElementById('submitRequest');
-if (submitBtn) {
-    submitBtn.addEventListener('click', () => {
-        const checked = document.querySelectorAll('.photo-select:checked');
-        const files   = Array.from(checked).map(cb => cb.dataset.filename);
-        console.log('Photo request:', { name: '{{ name }}', email: '{{ email }}', files });
-        document.getElementById('requestSuccess').classList.remove('d-none');
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<i class="bi bi-check me-1"></i>Sent!';
+document.getElementById('submitRequest')?.addEventListener('click', () => {
+    console.log('Photo request:', { name: '{{ name }}', email: '{{ email }}', files: [...basketItems] });
+    document.getElementById('requestSuccess').classList.remove('d-none');
+    document.getElementById('submitRequest').disabled = true;
+    document.getElementById('submitRequest').innerHTML = '<i class="bi bi-check me-1"></i>Sent!';
+});
+
+// ── Album selection mode ─────────────────────────────────────────────────────
+let albumSelected = new Set(PRE_ALBUM);   // start with already-submitted picks
+
+function enterAlbumMode() {
+    mode = 'album';
+    if (grid) grid.classList.add('album-mode');
+    albumModeBtn?.classList.add('active');
+    // Hide basket bar, show album bar
+    basketBar?.classList.remove('visible');
+    showCheckboxes(false);
+    // Mark pre-selected cards
+    document.querySelectorAll('.r-card').forEach(card => {
+        if (albumSelected.has(card.dataset.filename)) card.classList.add('album-selected');
+        else card.classList.remove('album-selected');
     });
+    updateAlbumCounter();
+    albumBar?.classList.add('visible');
+    // Disable photo links during selection
+    document.querySelectorAll('.photo-link').forEach(a => a.style.pointerEvents = 'none');
 }
+
+function cancelAlbumMode() {
+    mode = 'normal';
+    if (grid) grid.classList.remove('album-mode');
+    albumModeBtn?.classList.remove('active');
+    albumBar?.classList.remove('visible');
+    document.querySelectorAll('.photo-link').forEach(a => a.style.pointerEvents = '');
+    updateBasket();
+}
+
+function updateAlbumCounter() {
+    const n   = albumSelected.size;
+    const cnt = document.getElementById('albumCount');
+    if (cnt) cnt.textContent = n;
+
+    const lbl = document.getElementById('albumLimitLabel');
+    if (lbl) {
+        if (ALBUM_MAX > 0) lbl.textContent = `/ ${ALBUM_MAX} max`;
+        else if (ALBUM_MIN > 0) lbl.textContent = `(min ${ALBUM_MIN})`;
+    }
+
+    const btn = document.getElementById('finishAlbumBtn');
+    const counterAlert = document.getElementById('albumCounter');
+
+    let valid = true;
+    let msg = `${n} photo${n !== 1 ? 's' : ''} selected`;
+    if (ALBUM_MIN > 0 && n < ALBUM_MIN) { valid = false; msg += ` — need ${ALBUM_MIN - n} more`; }
+    if (ALBUM_MAX > 0 && n > ALBUM_MAX) { valid = false; msg += ` — remove ${n - ALBUM_MAX}`; }
+
+    if (btn) btn.disabled = !valid;
+    if (counterAlert) {
+        counterAlert.textContent = '';
+        const ico = document.createElement('i');
+        ico.className = 'bi bi-info-circle me-1';
+        counterAlert.appendChild(ico);
+        counterAlert.appendChild(document.createTextNode(msg));
+        counterAlert.classList.remove('d-none');
+        counterAlert.className = `alert py-2 small mb-3 alert-${valid ? 'info' : 'warning'}`;
+    }
+}
+
+function onCardClick(card, e) {
+    if (mode !== 'album') return;  // normal mode: link click handled by anchor
+    e.stopPropagation();
+    const fn = card.dataset.filename;
+    if (albumSelected.has(fn)) {
+        albumSelected.delete(fn);
+        card.classList.remove('album-selected');
+    } else {
+        if (ALBUM_MAX > 0 && albumSelected.size >= ALBUM_MAX) {
+            const btn = document.getElementById('finishAlbumBtn');
+            btn?.classList.add('btn-danger'); btn?.classList.remove('btn-success');
+            setTimeout(() => { btn?.classList.remove('btn-danger'); btn?.classList.add('btn-success'); }, 600);
+            return;
+        }
+        albumSelected.add(fn);
+        card.classList.add('album-selected');
+    }
+    updateAlbumCounter();
+}
+
+async function finishAlbum() {
+    if (!EVENT_ID) return;
+    const filenames = [...albumSelected];
+    try {
+        const res = await fetch('/album/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event_id: EVENT_ID, filenames })
+        });
+        const data = await res.json();
+        if (data.ok) {
+            cancelAlbumMode();
+            const msg = document.getElementById('albumDoneMsg');
+            if (msg) msg.textContent = `${data.count} photo(s) saved to your album.`;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('albumDoneModal')).show();
+            // Update ribbons
+            document.querySelectorAll('.r-card').forEach(card => {
+                const inAlbum = albumSelected.has(card.dataset.filename);
+                const wrap    = card.closest('.r-wrap');
+                const ribbon  = wrap?.querySelector('.ribbon-selected');
+                if (inAlbum && !ribbon) {
+                    const r = document.createElement('div');
+                    r.className = 'ribbon-selected'; r.textContent = 'In Album';
+                    wrap.appendChild(r);
+                } else if (!inAlbum && ribbon) {
+                    ribbon.remove();
+                }
+            });
+        } else {
+            alert(data.msg || 'Could not save selection.');
+        }
+    } catch (e) {
+        alert('Network error. Please try again.');
+    }
+}
+
+// Wire up album mode button
+albumModeBtn?.addEventListener('click', () => {
+    if (mode === 'normal') enterAlbumMode();
+    else cancelAlbumMode();
+});
+
+// In normal mode, show checkboxes via Select All btn click
+selectAllBtn?.addEventListener('click', () => { if (mode === 'normal') showCheckboxes(true); });
 </script>
 {% endblock %}

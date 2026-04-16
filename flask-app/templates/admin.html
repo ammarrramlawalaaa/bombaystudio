@@ -1,31 +1,46 @@
 {% extends "base.html" %}
-{% block title %}Admin Panel — Event Photo Finder{% endblock %}
+{% block title %}Admin — Bombay Studio{% endblock %}
 
 {% block extra_head %}
 <style>
 .nav-tabs .nav-link { font-weight: 600; color: #6c757d; }
 .nav-tabs .nav-link.active { color: #4f46e5; }
-.photo-gallery-card { transition: transform 0.15s ease, box-shadow 0.15s ease; cursor: pointer; }
-.photo-gallery-card:hover { transform: translateY(-3px); box-shadow: 0 6px 20px rgba(0,0,0,0.12) !important; }
-.user-avatar {
-    width: 36px; height: 36px; border-radius: 50%;
-    background: #4f46e5; color: #fff;
-    display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
-}
-.event-code {
-    font-family: monospace; font-size: 1.3rem; font-weight: 800;
-    letter-spacing: 4px; color: #4f46e5;
-}
 .progress { height: 22px; border-radius: 50px; }
 .progress-bar { border-radius: 50px; transition: width 0.4s ease; }
+.event-code { font-family: monospace; font-size: 1.25rem; font-weight: 800; letter-spacing: 4px; color: #4f46e5; }
+.user-avatar {
+    width: 36px; height: 36px; border-radius: 50%; background: #4f46e5; color: #fff;
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; flex-shrink: 0;
+}
+/* Gallery grid */
+.g-card { position: relative; border-radius: 10px; overflow: hidden; background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08); transition: box-shadow 0.15s, transform 0.15s; }
+.g-card:hover { box-shadow: 0 6px 20px rgba(0,0,0,0.13); transform: translateY(-2px); }
+.g-card.selected { outline: 3px solid #4f46e5; outline-offset: 0; }
+.g-cb { position: absolute; top: 8px; left: 8px; z-index: 5; width: 20px; height: 20px; accent-color: #4f46e5; cursor: pointer; }
+/* Bulk action bar */
+#bulkBar {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120%);
+    z-index: 1060; transition: transform 0.3s ease; white-space: nowrap;
+    background: #1e1e2e; color: #fff; padding: 12px 24px; border-radius: 50px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.35); display: flex; align-items: center; gap: 14px;
+}
+#bulkBar.visible { transform: translateX(-50%) translateY(0); }
+/* Watermark preview */
+#wmPreviewImg { width: 100%; border-radius: 10px; border: 1px solid #dee2e6; }
+.position-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.pos-btn { padding: 6px; font-size: 0.75rem; border-radius: 6px; }
+.pos-btn.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+/* Selections */
+.sel-thumb { width: 56px; height: 44px; object-fit: cover; border-radius: 6px; }
+.sel-user-block { background: #f8f9fa; border-radius: 10px; padding: 14px; margin-bottom: 10px; }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="container py-4">
 
-    <!-- Stats row -->
+    <!-- Header stats -->
     <div class="row mb-4 align-items-center">
         <div class="col">
             <div class="section-label">Admin Panel</div>
@@ -44,125 +59,118 @@
                 <div class="fw-bold fs-5 text-success">{{ users|length }}</div>
                 <div class="small text-muted">Users</div>
             </div>
+            <div class="card px-3 py-2 text-center">
+                <div class="fw-bold fs-5 text-warning">{{ selections|length }}</div>
+                <div class="small text-muted">Selections</div>
+            </div>
         </div>
     </div>
 
-    <!-- Progress bar (shown while a job is running) -->
+    <!-- Background indexing progress -->
     {% if current_job and current_job.status == 'running' %}
-    <div class="card p-3 mb-4 border-primary border-opacity-50" id="progressCard">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <span class="fw-semibold">
-                <span class="spinner-border spinner-border-sm text-primary me-2"></span>
-                Indexing in progress…
-            </span>
-            <span class="small text-muted" id="progressText">
-                {{ current_job.done }}/{{ current_job.total }} files
-            </span>
+    <div class="card p-3 mb-4 border-primary border-opacity-50">
+        <div class="d-flex justify-content-between mb-2">
+            <span class="fw-semibold"><span class="spinner-border spinner-border-sm text-primary me-2"></span>Indexing…</span>
+            <span class="small text-muted" id="progressText">{{ current_job.done }}/{{ current_job.total }}</span>
         </div>
         <div class="progress">
-            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary"
-                 id="progressBar"
-                 style="width: {{ (100 * current_job.done // current_job.total) if current_job.total else 0 }}%">
-            </div>
+            <div class="progress-bar progress-bar-striped progress-bar-animated bg-primary" id="progressBar"
+                 style="width:{{ (100*current_job.done//current_job.total) if current_job.total else 0 }}%"></div>
         </div>
     </div>
     {% endif %}
 
     <!-- Tabs -->
     <ul class="nav nav-tabs mb-4" id="adminTabs">
-        <li class="nav-item">
-            <a class="nav-link active" data-bs-toggle="tab" href="#events" role="tab">
-                <i class="bi bi-calendar-event me-1"></i>Events
-                <span class="badge bg-secondary ms-1">{{ events|length }}</span>
-            </a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" data-bs-toggle="tab" href="#upload" role="tab" id="tab-upload">
-                <i class="bi bi-cloud-upload me-1"></i>Upload
-            </a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" data-bs-toggle="tab" href="#gallery" role="tab">
-                <i class="bi bi-images me-1"></i>All Photos
-                <span class="badge bg-secondary ms-1">{{ photos|length }}</span>
-            </a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link" data-bs-toggle="tab" href="#users" role="tab">
-                <i class="bi bi-people me-1"></i>Users
-                <span class="badge bg-secondary ms-1">{{ users|length }}</span>
-            </a>
-        </li>
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#events"><i class="bi bi-calendar-event me-1"></i>Events</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#upload"><i class="bi bi-cloud-upload me-1"></i>Upload</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#gallery"><i class="bi bi-images me-1"></i>Gallery <span class="badge bg-secondary">{{ photos|length }}</span></a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#selections"><i class="bi bi-collection me-1"></i>Selections <span class="badge bg-warning text-dark">{{ selections|length }}</span></a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#watermark"><i class="bi bi-droplet-half me-1"></i>Watermark</a></li>
+        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#users"><i class="bi bi-people me-1"></i>Users <span class="badge bg-secondary">{{ users|length }}</span></a></li>
     </ul>
 
     <div class="tab-content">
 
-        <!-- ══ EVENTS TAB ══════════════════════════════════════════════════════ -->
-        <div class="tab-pane fade show active" id="events" role="tabpanel">
+        <!-- ══════════ EVENTS ══════════ -->
+        <div class="tab-pane fade show active" id="events">
             <div class="row g-4">
-                <!-- Create event form -->
                 <div class="col-lg-4">
                     <div class="card p-4">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-plus-circle me-2 text-primary"></i>Create New Event
-                        </h5>
+                        <h5 class="fw-bold mb-3"><i class="bi bi-plus-circle me-2 text-primary"></i>Create Event</h5>
                         <form method="post" action="{{ url_for('create_event') }}">
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Event Name</label>
-                                <input type="text" class="form-control" name="name"
-                                       placeholder="e.g. Annual Gala 2025" required>
+                                <input type="text" class="form-control" name="name" placeholder="e.g. Annual Gala 2025" required>
                             </div>
                             <div class="mb-3">
-                                <label class="form-label fw-semibold">Description <span class="text-muted fw-normal">(optional)</span></label>
-                                <textarea class="form-control" name="description" rows="2"
-                                          placeholder="Short description for guests"></textarea>
+                                <label class="form-label fw-semibold">Description <small class="text-muted fw-normal">(optional)</small></label>
+                                <textarea class="form-control" name="description" rows="2"></textarea>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col">
+                                    <label class="form-label fw-semibold">Min Album Photos</label>
+                                    <input type="number" class="form-control" name="album_min" min="0" value="0">
+                                    <div class="form-text">0 = no minimum</div>
+                                </div>
+                                <div class="col">
+                                    <label class="form-label fw-semibold">Max Album Photos</label>
+                                    <input type="number" class="form-control" name="album_max" min="0" value="0">
+                                    <div class="form-text">0 = no limit</div>
+                                </div>
                             </div>
                             <button type="submit" class="btn btn-primary w-100 fw-semibold">
                                 <i class="bi bi-magic me-2"></i>Create &amp; Generate Code
                             </button>
                         </form>
-                        <div class="mt-3 p-3 bg-light rounded small text-muted">
-                            <i class="bi bi-info-circle me-1"></i>
-                            A unique 5-digit code is automatically generated. Share it with guests so they can access their photos.
-                        </div>
                     </div>
                 </div>
-                <!-- Events list -->
                 <div class="col-lg-8">
                     <div class="card p-4">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-list-ul me-2 text-primary"></i>Your Events
-                        </h5>
+                        <h5 class="fw-bold mb-3"><i class="bi bi-list-ul me-2 text-primary"></i>Your Events</h5>
                         {% if events %}
                         <div class="row g-3">
                             {% for ev in events %}
                             <div class="col-md-6">
-                                <div class="card border h-100 p-3">
+                                <div class="card border p-3 h-100">
                                     <div class="d-flex justify-content-between align-items-start mb-2">
                                         <div>
                                             <div class="fw-bold">{{ ev.name }}</div>
-                                            {% if ev.description %}
-                                            <div class="text-muted small">{{ ev.description }}</div>
-                                            {% endif %}
-                                            <div class="text-muted small mt-1">
-                                                {{ ev.created_at[:10] if ev.created_at else '' }}
-                                            </div>
+                                            {% if ev.description %}<div class="small text-muted">{{ ev.description }}</div>{% endif %}
+                                            <div class="small text-muted">{{ ev.created_at[:10] if ev.created_at else '' }}</div>
                                         </div>
-                                        <form method="post"
-                                              action="{{ url_for('delete_event', event_id=ev.id) }}"
-                                              onsubmit="return confirm('Delete event \'{{ ev.name }}\' and ALL its photos?')">
-                                            <button type="submit" class="btn btn-sm btn-outline-danger">
-                                                <i class="bi bi-trash"></i>
-                                            </button>
+                                        <form method="post" action="{{ url_for('delete_event', event_id=ev.id) }}"
+                                              onsubmit="return confirm('Delete event and ALL its photos?')">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
                                         </form>
                                     </div>
-                                    <div class="mt-auto pt-2 border-top">
-                                        <div class="small text-muted mb-1">Guest Access Code</div>
-                                        <div class="event-code">{{ ev.code }}</div>
-                                        <button class="btn btn-sm btn-outline-secondary mt-1"
-                                                onclick="navigator.clipboard.writeText('{{ ev.code }}');this.innerHTML='<i class=\'bi bi-check\' ></i> Copied!'">
+                                    <div class="border-top pt-2 mt-auto">
+                                        <div class="small text-muted">Guest Code</div>
+                                        <div class="event-code mb-1">{{ ev.code }}</div>
+                                        <button class="btn btn-sm btn-outline-secondary"
+                                                onclick="navigator.clipboard.writeText('{{ ev.code }}');this.innerHTML='<i class=\'bi bi-check\'></i> Copied!'">
                                             <i class="bi bi-clipboard me-1"></i>Copy
                                         </button>
+                                    </div>
+                                    <!-- Album limits edit -->
+                                    <div class="border-top pt-2 mt-2">
+                                        <form method="post" action="{{ url_for('update_event', event_id=ev.id) }}"
+                                              class="d-flex align-items-end gap-2 flex-wrap">
+                                            <div>
+                                                <label class="form-label small mb-0 fw-semibold">Min</label>
+                                                <input type="number" class="form-control form-control-sm" name="album_min"
+                                                       value="{{ ev.album_min or 0 }}" min="0" style="width:70px;">
+                                            </div>
+                                            <div>
+                                                <label class="form-label small mb-0 fw-semibold">Max</label>
+                                                <input type="number" class="form-control form-control-sm" name="album_max"
+                                                       value="{{ ev.album_max or 0 }}" min="0" style="width:70px;">
+                                            </div>
+                                            <button type="submit" class="btn btn-sm btn-outline-primary">
+                                                <i class="bi bi-save me-1"></i>Save Limits
+                                            </button>
+                                        </form>
+                                        <div class="form-text">Album selection limits (0 = no restriction)</div>
                                     </div>
                                 </div>
                             </div>
@@ -170,8 +178,7 @@
                         </div>
                         {% else %}
                         <div class="text-center py-5 text-muted">
-                            <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>
-                            No events yet. Create one on the left.
+                            <i class="bi bi-calendar-x fs-1 d-block mb-2"></i>No events yet.
                         </div>
                         {% endif %}
                     </div>
@@ -179,154 +186,87 @@
             </div>
         </div>
 
-        <!-- ══ UPLOAD TAB ══════════════════════════════════════════════════════ -->
-        <div class="tab-pane fade" id="upload" role="tabpanel">
+        <!-- ══════════ UPLOAD ══════════ -->
+        <div class="tab-pane fade" id="upload">
             {% if not events %}
             <div class="card p-5 text-center text-muted">
                 <i class="bi bi-exclamation-circle fs-1 d-block mb-2 text-warning"></i>
                 <h5>Create an event first</h5>
-                <p>You need at least one event before uploading photos.</p>
-                <a href="#events" class="btn btn-primary" onclick="bootstrap.Tab.getOrCreateInstance(document.querySelector('[href=\'#events\']')).show()">
-                    Go to Events tab
-                </a>
+                <a href="#events" class="btn btn-primary mt-2"
+                   onclick="bootstrap.Tab.getOrCreateInstance(document.querySelector('[href=\'#events\']')).show()">Go to Events</a>
             </div>
             {% else %}
             <div class="row g-4">
                 <div class="col-lg-5">
                     <div class="card p-4">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-cloud-upload me-2 text-primary"></i>Bulk Upload
-                        </h5>
-                        <form method="post" enctype="multipart/form-data" id="uploadForm"
-                              action="{{ url_for('admin') }}">
+                        <h5 class="fw-bold mb-3"><i class="bi bi-cloud-upload me-2 text-primary"></i>Bulk Upload</h5>
+                        <form method="post" enctype="multipart/form-data" id="uploadForm">
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Select Event</label>
                                 <select class="form-select" name="event_id" required>
-                                    <option value="">— Choose an event —</option>
-                                    {% for ev in events %}
-                                    <option value="{{ ev.id }}">{{ ev.name }} ({{ ev.code }})</option>
-                                    {% endfor %}
+                                    <option value="">— Choose event —</option>
+                                    {% for ev in events %}<option value="{{ ev.id }}">{{ ev.name }} ({{ ev.code }})</option>{% endfor %}
                                 </select>
                             </div>
-                            <div class="drop-zone mb-3" id="dropZone"
-                                 onclick="document.getElementById('photosInput').click()">
-                                <input type="file" name="photos" id="photosInput"
-                                       multiple accept="image/*,video/mp4,video/quicktime">
+                            <div class="drop-zone mb-3" id="dropZone" onclick="document.getElementById('photosInput').click()">
+                                <input type="file" name="photos" id="photosInput" multiple accept="image/*,video/mp4,video/quicktime">
                                 <i class="bi bi-images fs-1 text-muted d-block mb-2"></i>
-                                <div id="dropLabel">
-                                    <strong>Click to browse</strong> or drag &amp; drop<br>
-                                    <span class="text-muted small">Photos: JPG, PNG, WEBP &nbsp;|&nbsp; Videos: MP4, MOV</span>
-                                </div>
+                                <div id="dropLabel"><strong>Click to browse</strong> or drag &amp; drop<br>
+                                    <span class="text-muted small">JPG, PNG, WEBP, MP4, MOV</span></div>
                                 <div id="fileCount" class="mt-2 fw-semibold text-primary d-none"></div>
-                                <ul id="fileList" class="mt-2 list-unstyled text-muted small text-start d-none mb-0"
-                                    style="max-height:130px;overflow-y:auto;"></ul>
+                                <ul id="fileList" class="mt-2 list-unstyled text-muted small text-start d-none mb-0" style="max-height:120px;overflow-y:auto;"></ul>
                             </div>
                             <button type="submit" class="btn btn-primary w-100 fw-semibold" id="uploadBtn">
                                 <i class="bi bi-cpu me-2"></i>Upload &amp; Index (Background)
                             </button>
                         </form>
                         <div class="mt-3 p-3 bg-light rounded small text-muted">
-                            <i class="bi bi-info-circle me-1"></i>
-                            Already-indexed files are skipped automatically. Videos are sampled at 1 frame/second. Processing runs in the background — you can navigate freely.
+                            <i class="bi bi-info-circle me-1"></i>Already-indexed files are skipped. Videos sampled at 1fps. Runs in the background.
                         </div>
                     </div>
                 </div>
                 <div class="col-lg-7">
-                    <!-- Live progress -->
-                    <div class="card p-4" id="liveJobCard" style="display:none!important;">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-activity me-2 text-primary"></i>Indexing Progress
-                        </h5>
+                    <div class="card p-4 d-none" id="liveJobCard">
+                        <h5 class="fw-bold mb-3"><i class="bi bi-activity me-2 text-primary"></i>Progress</h5>
                         <div class="d-flex justify-content-between mb-2">
                             <span id="jobStatusText" class="text-muted small">Starting…</span>
                             <span id="jobCountText" class="fw-semibold small"></span>
                         </div>
-                        <div class="progress mb-3">
+                        <div class="progress mb-2">
                             <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated"
                                  id="jobBar" style="width:0%">0%</div>
                         </div>
                         <ul id="jobErrors" class="list-unstyled small text-danger mb-0"></ul>
                     </div>
-                    <!-- File summary for this event -->
-                    {% if photos %}
-                    <div class="card p-4 mt-3">
-                        <h5 class="fw-bold mb-3">
-                            <i class="bi bi-list-ul me-2 text-primary"></i>Indexed Files
-                        </h5>
-                        <div class="table-responsive" style="max-height:360px;overflow-y:auto;">
-                            <table class="table table-sm table-hover align-middle mb-0">
-                                <thead class="table-light sticky-top">
-                                    <tr>
-                                        <th>Preview</th>
-                                        <th>File</th>
-                                        <th>Event</th>
-                                        <th class="text-center">Faces</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for p in photos %}
-                                    <tr>
-                                        <td style="width:60px;">
-                                            {% if p.media_type == 'video' %}
-                                            <div style="width:50px;height:40px;background:#222;border-radius:6px;display:flex;align-items:center;justify-content:center;">
-                                                <i class="bi bi-camera-video text-white"></i>
-                                            </div>
-                                            {% else %}
-                                            <a href="{{ url_for('uploaded_file', filename=p.photo_filename) }}" target="_blank">
-                                                <img src="{{ url_for('uploaded_file', filename=p.photo_filename) }}"
-                                                     style="width:50px;height:40px;object-fit:cover;border-radius:6px;">
-                                            </a>
-                                            {% endif %}
-                                        </td>
-                                        <td class="text-truncate" style="max-width:160px;" title="{{ p.photo_filename }}">
-                                            {{ p.photo_filename }}
-                                        </td>
-                                        <td class="small text-muted">{{ p.event_name or '—' }}</td>
-                                        <td class="text-center">
-                                            <span class="face-badge"><i class="bi bi-person me-1"></i>{{ p.face_count }}</span>
-                                        </td>
-                                        <td>
-                                            <form method="post" action="{{ url_for('delete_photo', filename=p.photo_filename) }}"
-                                                  onsubmit="return confirm('Delete {{ p.photo_filename }}?')">
-                                                <input type="hidden" name="event_id" value="{{ p.event_id }}">
-                                                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
-                                                    <i class="bi bi-trash"></i>
-                                                </button>
-                                            </form>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    {% endif %}
                 </div>
             </div>
             {% endif %}
         </div>
 
-        <!-- ══ GALLERY TAB ════════════════════════════════════════════════════ -->
-        <div class="tab-pane fade" id="gallery" role="tabpanel">
+        <!-- ══════════ GALLERY ══════════ -->
+        <div class="tab-pane fade" id="gallery">
             {% if photos %}
             <div class="mb-3 d-flex gap-2 align-items-center flex-wrap">
-                <span class="text-muted small me-auto">{{ photos|length }} file(s)</span>
+                <button class="btn btn-sm btn-outline-secondary" id="selectAllGallery">
+                    <i class="bi bi-check-all me-1"></i>Select All
+                </button>
                 <select class="form-select form-select-sm w-auto" id="eventFilter">
                     <option value="">All Events</option>
-                    {% for ev in events %}
-                    <option value="{{ ev.id }}">{{ ev.name }}</option>
-                    {% endfor %}
+                    {% for ev in events %}<option value="{{ ev.id }}">{{ ev.name }}</option>{% endfor %}
                 </select>
                 <input type="text" class="form-control form-control-sm w-auto" id="gallerySearch"
-                       placeholder="Search filename…" style="min-width:180px;">
+                       placeholder="Search…" style="min-width:160px;">
+                <span class="ms-auto text-muted small">{{ photos|length }} file(s)</span>
             </div>
             <div class="row g-3" id="galleryGrid">
                 {% for p in photos %}
                 <div class="col-6 col-md-4 col-lg-3 gallery-item"
-                     data-name="{{ p.photo_filename|lower }}"
-                     data-event="{{ p.event_id }}">
-                    <div class="card overflow-hidden photo-gallery-card">
+                     data-name="{{ p.photo_filename|lower }}" data-event="{{ p.event_id }}"
+                     data-filename="{{ p.photo_filename }}" data-eventid="{{ p.event_id }}">
+                    <div class="g-card" id="gcard_{{ loop.index }}">
+                        <input type="checkbox" class="g-cb gallery-cb" id="gcb_{{ loop.index }}"
+                               data-filename="{{ p.photo_filename }}" data-eventid="{{ p.event_id }}"
+                               onchange="onGalleryCheck(this)">
                         {% if p.media_type == 'video' %}
                         <div style="aspect-ratio:4/3;background:#111;display:flex;align-items:center;justify-content:center;">
                             <i class="bi bi-camera-video text-white fs-1"></i>
@@ -338,18 +278,11 @@
                                  style="width:100%;height:100%;object-fit:cover;">
                         </a>
                         {% endif %}
-                        <div class="card-body py-2 px-2">
+                        <div class="px-2 py-1">
                             <p class="mb-1 small text-truncate" title="{{ p.photo_filename }}">{{ p.photo_filename }}</p>
-                            <div class="d-flex align-items-center justify-content-between">
+                            <div class="d-flex align-items-center gap-1">
                                 <span class="face-badge small"><i class="bi bi-person"></i> {{ p.face_count }}</span>
-                                <span class="badge bg-light text-muted small">{{ p.event_name or '—' }}</span>
-                                <form method="post" action="{{ url_for('delete_photo', filename=p.photo_filename) }}"
-                                      onsubmit="return confirm('Delete?')">
-                                    <input type="hidden" name="event_id" value="{{ p.event_id }}">
-                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </form>
+                                <span class="badge bg-light text-muted small ms-auto">{{ p.event_name or '—' }}</span>
                             </div>
                         </div>
                     </div>
@@ -360,16 +293,142 @@
             <div class="card p-5 text-center text-muted">
                 <i class="bi bi-inbox fs-1 d-block mb-2"></i>
                 <h5>No photos yet</h5>
-                <p class="mb-0">Upload photos in the <strong>Upload</strong> tab.</p>
             </div>
             {% endif %}
         </div>
 
-        <!-- ══ USERS TAB ══════════════════════════════════════════════════════ -->
-        <div class="tab-pane fade" id="users" role="tabpanel">
+        <!-- ══════════ SELECTIONS ══════════ -->
+        <div class="tab-pane fade" id="selections">
+            {% if selections %}
+            {# Group by event then user #}
+            {% set ns = namespace(cur_event='', cur_user='') %}
+            {% for sel in selections %}
+                {% if sel.event_name != ns.cur_event %}
+                    {% if ns.cur_event != '' %}</div></div>{% endif %}
+                    <h5 class="fw-bold mt-3 mb-2">
+                        <i class="bi bi-calendar-event me-2 text-primary"></i>{{ sel.event_name }}
+                        <span class="badge bg-light text-muted fs-6 ms-2" style="font-family:monospace;letter-spacing:2px;">{{ sel.event_code }}</span>
+                    </h5>
+                    <div class="card p-3">
+                    {% set ns.cur_event = sel.event_name %}
+                    {% set ns.cur_user = '' %}
+                {% endif %}
+                {% if sel.user_name != ns.cur_user %}
+                    {% if ns.cur_user != '' %}</div>{% endif %}
+                    <div class="sel-user-block mb-3">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <div class="user-avatar">{{ sel.user_name[0]|upper }}</div>
+                            <div>
+                                <div class="fw-semibold">{{ sel.user_name }}</div>
+                                <div class="small text-muted">{{ sel.user_email }}</div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2">
+                    {% set ns.cur_user = sel.user_name %}
+                {% endif %}
+                <div>
+                    <img src="{{ url_for('uploaded_file', filename=sel.photo_filename) }}"
+                         class="sel-thumb" title="{{ sel.photo_filename }}">
+                </div>
+            {% endfor %}
+            {% if ns.cur_event != '' %}</div></div></div>{% endif %}
+            {% else %}
+            <div class="card p-5 text-center text-muted">
+                <i class="bi bi-collection fs-1 d-block mb-2"></i>
+                <h5>No album selections yet</h5>
+                <p class="mb-0">Guests can select photos for their album from the guest portal.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- ══════════ WATERMARK ══════════ -->
+        <div class="tab-pane fade" id="watermark">
+            <div class="row g-4">
+                <div class="col-lg-5">
+                    <div class="card p-4">
+                        <h5 class="fw-bold mb-3"><i class="bi bi-droplet-half me-2 text-primary"></i>Watermark Settings</h5>
+                        <form method="post" action="{{ url_for('save_watermark') }}" id="wmForm">
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="wmEnabled"
+                                       name="enabled" {% if wm.enabled %}checked{% endif %}>
+                                <label class="form-check-label fw-semibold" for="wmEnabled">
+                                    Enable Watermark on Guest Photos
+                                </label>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Watermark Text</label>
+                                <input type="text" class="form-control" name="text" id="wmText"
+                                       value="{{ wm.text or 'Bombay Studio' }}" maxlength="80">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Font Size: <span id="wmSizeVal">{{ wm.font_size or 48 }}</span>px</label>
+                                <input type="range" class="form-range" name="font_size" id="wmSize"
+                                       min="12" max="120" value="{{ wm.font_size or 48 }}"
+                                       oninput="document.getElementById('wmSizeVal').textContent=this.value">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Opacity: <span id="wmOpacVal">{{ wm.opacity or 60 }}</span>%</label>
+                                <input type="range" class="form-range" name="opacity" id="wmOpacity"
+                                       min="5" max="100" value="{{ wm.opacity or 60 }}"
+                                       oninput="document.getElementById('wmOpacVal').textContent=this.value">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Color</label>
+                                <div class="d-flex align-items-center gap-2">
+                                    <input type="color" class="form-control form-control-color" name="color" id="wmColor"
+                                           value="{{ wm.color or '#ffffff' }}" style="width:60px;">
+                                    <span class="text-muted small">Text colour on photos</span>
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="form-label fw-semibold">Position</label>
+                                <div class="position-grid" id="posGrid">
+                                    {% set positions = [
+                                        ('top-left','↖'),('top-center','↑'),('top-right','↗'),
+                                        ('center-left','←'),('center','✛'),('center-right','→'),
+                                        ('bottom-left','↙'),('bottom-center','↓'),('bottom-right','↘')
+                                    ] %}
+                                    {% for val, icon in positions %}
+                                    <button type="button"
+                                            class="btn btn-outline-secondary pos-btn {% if (wm.position or 'bottom-right') == val %}active{% endif %}"
+                                            data-pos="{{ val }}" onclick="selectPos(this)">
+                                        {{ icon }}<br><span class="text-muted" style="font-size:0.65rem;">{{ val }}</span>
+                                    </button>
+                                    {% endfor %}
+                                </div>
+                                <input type="hidden" name="position" id="wmPosition" value="{{ wm.position or 'bottom-right' }}">
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button type="submit" class="btn btn-primary flex-grow-1 fw-semibold">
+                                    <i class="bi bi-save me-2"></i>Save Settings
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" id="previewBtn"
+                                        onclick="refreshPreview()">
+                                    <i class="bi bi-eye me-1"></i>Preview
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="card p-3">
+                        <h5 class="fw-bold mb-3"><i class="bi bi-eye me-2 text-primary"></i>Live Preview</h5>
+                        <img id="wmPreviewImg" src="{{ url_for('watermark_preview') }}"
+                             alt="Watermark preview" class="rounded border">
+                        <div class="mt-2 small text-muted text-center">
+                            Click <strong>Preview</strong> to refresh after changing settings.
+                            Watermark is applied to all guest-viewed photos when enabled.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════ USERS ══════════ -->
+        <div class="tab-pane fade" id="users">
             {% if users %}
             <div class="mb-3 d-flex align-items-center gap-2">
-                <span class="text-muted small me-auto">{{ users|length }} registered user(s)</span>
+                <span class="text-muted small me-auto">{{ users|length }} user(s)</span>
                 <input type="text" class="form-control form-control-sm w-auto" id="userSearch"
                        placeholder="Search…" style="min-width:220px;">
             </div>
@@ -377,12 +436,7 @@
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="table-light">
-                            <tr>
-                                <th>#</th>
-                                <th>Name</th>
-                                <th>Email</th>
-                                <th>Registered</th>
-                            </tr>
+                            <tr><th>#</th><th>Name</th><th>Email</th><th>Registered</th></tr>
                         </thead>
                         <tbody>
                             {% for u in users %}
@@ -404,101 +458,200 @@
             </div>
             {% else %}
             <div class="card p-5 text-center text-muted">
-                <i class="bi bi-people fs-1 d-block mb-2"></i>
-                <h5>No users registered yet</h5>
+                <i class="bi bi-people fs-1 d-block mb-2"></i><h5>No users yet</h5>
             </div>
             {% endif %}
         </div>
 
     </div><!-- /tab-content -->
 </div>
+
+<!-- ── Bulk delete floating bar ────────────────────────────────────────────── -->
+<div id="bulkBar">
+    <i class="bi bi-check-circle-fill text-info"></i>
+    <span id="bulkCount">0</span> selected
+    <button class="btn btn-sm btn-outline-light" onclick="clearGallerySelection()">Clear</button>
+    <button class="btn btn-sm btn-danger fw-semibold" onclick="bulkDelete()">
+        <i class="bi bi-trash me-1"></i>Delete Selected
+    </button>
+</div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-// ── Drag & drop ─────────────────────────────────────────────────────────
-const dropZone     = document.getElementById('dropZone');
-const photosInput  = document.getElementById('photosInput');
-const fileCountEl  = document.getElementById('fileCount');
-const fileListEl   = document.getElementById('fileList');
-const uploadBtn    = document.getElementById('uploadBtn');
+// ── Drag & drop upload ───────────────────────────────────────────────────────
+const dropZone    = document.getElementById('dropZone');
+const photosInput = document.getElementById('photosInput');
+const fileCountEl = document.getElementById('fileCount');
+const fileListEl  = document.getElementById('fileList');
 
 if (photosInput) {
     photosInput.addEventListener('change', updateFileList);
     function updateFileList() {
         const files = photosInput.files;
-        if (!files.length) { fileCountEl.classList.add('d-none'); fileListEl.classList.add('d-none'); return; }
-        fileCountEl.textContent = `${files.length} file${files.length > 1 ? 's' : ''} selected`;
+        if (!files.length) return;
+        fileCountEl.textContent = `${files.length} file(s) selected`;
         fileCountEl.classList.remove('d-none');
         fileListEl.innerHTML = '';
         Array.from(files).forEach(f => {
             const li = document.createElement('li');
-            const icon = f.type.startsWith('video') ? 'bi-camera-video' : 'bi-image';
-            li.innerHTML = `<i class="bi ${icon} me-1"></i>${f.name}`;
+            li.innerHTML = `<i class="bi bi-${f.type.startsWith('video') ? 'camera-video' : 'image'} me-1"></i>${f.name}`;
             fileListEl.appendChild(li);
         });
         fileListEl.classList.remove('d-none');
     }
-    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    ['dragover','dragenter'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('dragover'); }));
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
     dropZone.addEventListener('drop', e => {
         e.preventDefault(); dropZone.classList.remove('dragover');
         photosInput.files = e.dataTransfer.files; updateFileList();
     });
     document.getElementById('uploadForm').addEventListener('submit', () => {
-        if (uploadBtn) { uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading…'; uploadBtn.disabled = true; }
+        const btn = document.getElementById('uploadBtn');
+        if (btn) { btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading…'; btn.disabled = true; }
     });
 }
 
-// ── Live progress polling ────────────────────────────────────────────────
+// ── Progress polling ─────────────────────────────────────────────────────────
 const JOB_ID = "{{ job_id or '' }}";
-const liveCard = document.getElementById('liveJobCard');
-const jobBar   = document.getElementById('jobBar');
-const jobText  = document.getElementById('jobStatusText');
-const jobCount = document.getElementById('jobCountText');
-const jobErr   = document.getElementById('jobErrors');
-
 function pollProgress() {
     if (!JOB_ID) return;
     fetch(`/admin/status?job_id=${JOB_ID}`)
-        .then(r => r.json())
-        .then(data => {
+        .then(r => r.json()).then(data => {
             if (data.status === 'idle') return;
-            if (liveCard) liveCard.style.removeProperty('display');
+            const card = document.getElementById('liveJobCard');
+            if (card) card.classList.remove('d-none');
             const pct = data.percent || 0;
-            if (jobBar) { jobBar.style.width = pct + '%'; jobBar.textContent = pct + '%'; }
-            if (jobText) jobText.textContent = data.status === 'complete' ? '✅ Done!' : 'Indexing…';
-            if (jobCount) jobCount.textContent = `${data.done}/${data.total} files`;
-            if (jobErr && data.errors && data.errors.length) {
-                jobErr.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
+            const bar = document.getElementById('jobBar');
+            if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+            const st = document.getElementById('jobStatusText');
+            if (st) st.textContent = data.status === 'complete' ? '✅ Done!' : 'Indexing…';
+            const ct = document.getElementById('jobCountText');
+            if (ct) ct.textContent = `${data.done}/${data.total} files`;
+            if (data.errors && data.errors.length) {
+                const el = document.getElementById('jobErrors');
+                if (el) el.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
             }
-            if (data.status !== 'complete') {
-                setTimeout(pollProgress, 1500);
-            } else {
-                // Remove striped animation when done
-                if (jobBar) { jobBar.classList.remove('progress-bar-striped', 'progress-bar-animated'); jobBar.classList.add('bg-success'); }
-            }
-        })
-        .catch(() => setTimeout(pollProgress, 3000));
+            if (data.status !== 'complete') setTimeout(pollProgress, 1500);
+            else if (bar) { bar.classList.remove('progress-bar-striped','progress-bar-animated'); bar.classList.add('bg-success'); }
+        }).catch(() => setTimeout(pollProgress, 3000));
 }
 if (JOB_ID) pollProgress();
 
-// ── Gallery filter + search ──────────────────────────────────────────────
+// ── Gallery filter ───────────────────────────────────────────────────────────
 const gallerySearch = document.getElementById('gallerySearch');
 const eventFilter   = document.getElementById('eventFilter');
 function filterGallery() {
-    const q  = (gallerySearch ? gallerySearch.value.toLowerCase() : '');
-    const ev = (eventFilter   ? eventFilter.value : '');
+    const q  = gallerySearch ? gallerySearch.value.toLowerCase() : '';
+    const ev = eventFilter   ? eventFilter.value : '';
     document.querySelectorAll('.gallery-item').forEach(el => {
-        const nameMatch  = el.dataset.name.includes(q);
-        const eventMatch = !ev || el.dataset.event === ev;
-        el.style.display = (nameMatch && eventMatch) ? '' : 'none';
+        el.style.display = (el.dataset.name.includes(q) && (!ev || el.dataset.event === ev)) ? '' : 'none';
     });
 }
 if (gallerySearch) gallerySearch.addEventListener('input', filterGallery);
 if (eventFilter)   eventFilter.addEventListener('change', filterGallery);
 
-// ── User search ──────────────────────────────────────────────────────────
+// ── Gallery bulk select ──────────────────────────────────────────────────────
+let gallerySelected = new Set();
+
+function onGalleryCheck(cb) {
+    const card = cb.closest('.g-card');
+    if (cb.checked) {
+        gallerySelected.add(cb.dataset.filename + '|' + cb.dataset.eventid);
+        if (card) card.classList.add('selected');
+    } else {
+        gallerySelected.delete(cb.dataset.filename + '|' + cb.dataset.eventid);
+        if (card) card.classList.remove('selected');
+    }
+    updateBulkBar();
+}
+
+function updateBulkBar() {
+    const bar = document.getElementById('bulkBar');
+    const cnt = document.getElementById('bulkCount');
+    if (!bar) return;
+    cnt.textContent = gallerySelected.size;
+    bar.classList.toggle('visible', gallerySelected.size > 0);
+}
+
+let allGallerySelected = false;
+const selectAllBtn = document.getElementById('selectAllGallery');
+if (selectAllBtn) {
+    selectAllBtn.addEventListener('click', () => {
+        allGallerySelected = !allGallerySelected;
+        document.querySelectorAll('.gallery-cb').forEach(cb => {
+            const item = cb.closest('.gallery-item');
+            if (item && item.style.display !== 'none') {
+                cb.checked = allGallerySelected;
+                onGalleryCheck(cb);
+            }
+        });
+        selectAllBtn.innerHTML = allGallerySelected
+            ? '<i class="bi bi-x-circle me-1"></i>Deselect All'
+            : '<i class="bi bi-check-all me-1"></i>Select All';
+    });
+}
+
+function clearGallerySelection() {
+    gallerySelected.clear();
+    document.querySelectorAll('.gallery-cb').forEach(cb => {
+        cb.checked = false;
+        const card = cb.closest('.g-card');
+        if (card) card.classList.remove('selected');
+    });
+    allGallerySelected = false;
+    if (selectAllBtn) selectAllBtn.innerHTML = '<i class="bi bi-check-all me-1"></i>Select All';
+    updateBulkBar();
+}
+
+async function bulkDelete() {
+    if (!gallerySelected.size) return;
+    if (!confirm(`Delete ${gallerySelected.size} selected photo(s)? This cannot be undone.`)) return;
+
+    const items = Array.from(gallerySelected).map(s => {
+        const [filename, event_id] = s.split('|');
+        return { filename, event_id: parseInt(event_id) || null };
+    });
+
+    const res = await fetch('/admin/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(items)
+    });
+    const data = await res.json();
+    if (data.ok) {
+        // Remove deleted cards from DOM
+        document.querySelectorAll('.gallery-cb:checked').forEach(cb => {
+            const item = cb.closest('.gallery-item');
+            if (item) item.remove();
+        });
+        gallerySelected.clear();
+        updateBulkBar();
+        // Brief success toast
+        const toast = document.createElement('div');
+        toast.className = 'position-fixed top-0 end-0 m-3 alert alert-success shadow';
+        toast.style.zIndex = 9999;
+        toast.innerHTML = `<i class="bi bi-check-circle me-1"></i>${data.deleted} photo(s) deleted.`;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    } else {
+        alert('Error: ' + (data.msg || 'Unknown'));
+    }
+}
+
+// ── Watermark ────────────────────────────────────────────────────────────────
+function selectPos(btn) {
+    document.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('wmPosition').value = btn.dataset.pos;
+}
+
+function refreshPreview() {
+    const img = document.getElementById('wmPreviewImg');
+    if (img) img.src = '/admin/watermark/preview?t=' + Date.now();
+}
+
+// ── User search ──────────────────────────────────────────────────────────────
 const userSearch = document.getElementById('userSearch');
 if (userSearch) {
     userSearch.addEventListener('input', function() {
@@ -509,16 +662,17 @@ if (userSearch) {
     });
 }
 
-// ── Persist active tab ───────────────────────────────────────────────────
+// ── Tab persistence ──────────────────────────────────────────────────────────
 const hash = window.location.hash;
 if (hash) {
-    const trigger = document.querySelector(`[href="${hash}"]`);
-    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
-}
-const savedTab = sessionStorage.getItem('adminTab');
-if (!hash && savedTab) {
-    const trigger = document.querySelector(`[href="${savedTab}"]`);
-    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+    const t = document.querySelector(`[href="${hash}"]`);
+    if (t) bootstrap.Tab.getOrCreateInstance(t).show();
+} else {
+    const saved = sessionStorage.getItem('adminTab');
+    if (saved) {
+        const t = document.querySelector(`[href="${saved}"]`);
+        if (t) bootstrap.Tab.getOrCreateInstance(t).show();
+    }
 }
 document.querySelectorAll('#adminTabs .nav-link').forEach(el => {
     el.addEventListener('shown.bs.tab', e => {

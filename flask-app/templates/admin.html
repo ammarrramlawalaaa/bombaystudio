@@ -587,7 +587,8 @@ function uploadBatch(batchFiles, eventId, progressCb) {
         batchFiles.forEach((f) => fd.append('photos', f));
 
         const xhr = new XMLHttpRequest();
-        const uploadUrl = uploadForm.action ? uploadForm.action : (window.location.pathname || '/admin');
+        // FORCE the exact URL to bypass browser slash bugs
+        const uploadUrl = '/admin'; 
         xhr.open('POST', uploadUrl, true);
         xhr.withCredentials = true;
         // Mark as AJAX request so server returns JSON instead of redirect
@@ -781,12 +782,22 @@ if (photosInput) {
 
             if (uploadProgressBar) {
                 uploadProgressBar.style.width = '100%';
-                uploadProgressBar.textContent = '100%';
+                uploadProgressBar.textContent = 'Done!';
+                uploadProgressBar.classList.remove('bg-info');
+                uploadProgressBar.classList.add('bg-success');
             }
             if (uploadProgressText) {
-                uploadProgressText.textContent = `${formatBytes(totalBytes)} / ${formatBytes(totalBytes)}`;
+                uploadProgressText.textContent = `Completed: ${formatBytes(totalBytes)}`;
             }
-            window.location.assign(`${window.location.pathname}#upload`);
+            if (uploadBtn) {
+                uploadBtn.innerHTML = '<i class="bi bi-check-circle me-2"></i>Upload Complete';
+                uploadBtn.classList.replace('btn-primary', 'btn-success');
+            }
+            
+            // FORCE a hard reload after 1 second so the gallery updates
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
         })();
     });
 }

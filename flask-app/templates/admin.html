@@ -533,8 +533,10 @@ const uploadProgressWrap = document.getElementById('uploadProgressWrap');
 const uploadProgressBar = document.getElementById('uploadProgressBar');
 const uploadProgressText = document.getElementById('uploadProgressText');
 const uploadLimitsEl = document.getElementById('uploadLimits');
-const MAX_BATCH_FILES = Number(uploadLimitsEl?.dataset.maxFiles || 150);
-const MAX_BATCH_BYTES = Number(uploadLimitsEl?.dataset.maxBytes || 1073741824);
+// FORCE safe batching: Max 50 files OR 50MB per batch. 
+// This guarantees it never triggers the Nginx 100MB kill-switch.
+const MAX_BATCH_FILES = 50;
+const MAX_BATCH_BYTES = 50 * 1024 * 1024; // 50 Megabytes
 
 function formatBytes(bytes) {
     if (!Number.isFinite(bytes) || bytes < 0) return '0 B';

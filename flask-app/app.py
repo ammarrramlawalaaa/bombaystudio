@@ -159,21 +159,21 @@ def _get_font(size: int):
 
 
 def _resize_to_1080p(img: Image.Image) -> Image.Image:
-    """Downscale image to fit within 1920x1080 (preserving aspect ratio).
-    Landscape images → capped at 1920 wide; portrait → capped at 1080 wide.
-    Never upscales.
+    """Fit image into an exact 1920×1080 canvas (letterboxed, black bars).
+    Every output is exactly 1920×1080 so the watermark always lands in the
+    same spot regardless of the original photo's aspect ratio or resolution.
     """
-    MAX_W, MAX_H = 1920, 1080
+    TARGET_W, TARGET_H = 1920, 1080
     w, h = img.size
-    # Portrait: swap limits
-    if h > w:
-        MAX_W, MAX_H = MAX_H, MAX_W
-    if w <= MAX_W and h <= MAX_H:
-        return img  # already small enough
-    ratio = min(MAX_W / w, MAX_H / h)
+    ratio = min(TARGET_W / w, TARGET_H / h)
     new_w = int(w * ratio)
     new_h = int(h * ratio)
-    return img.resize((new_w, new_h), Image.LANCZOS)
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+    canvas = Image.new("RGB", (TARGET_W, TARGET_H), (0, 0, 0))
+    offset_x = (TARGET_W - new_w) // 2
+    offset_y = (TARGET_H - new_h) // 2
+    canvas.paste(resized, (offset_x, offset_y))
+    return canvas
 
 
 def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:

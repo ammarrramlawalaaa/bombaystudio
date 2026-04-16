@@ -158,8 +158,29 @@ def _get_font(size: int):
         return ImageFont.load_default()
 
 
+def _resize_to_1080p(img: Image.Image) -> Image.Image:
+    """Downscale image to fit within 1920x1080 (preserving aspect ratio).
+    Landscape images → capped at 1920 wide; portrait → capped at 1080 wide.
+    Never upscales.
+    """
+    MAX_W, MAX_H = 1920, 1080
+    w, h = img.size
+    # Portrait: swap limits
+    if h > w:
+        MAX_W, MAX_H = MAX_H, MAX_W
+    if w <= MAX_W and h <= MAX_H:
+        return img  # already small enough
+    ratio = min(MAX_W / w, MAX_H / h)
+    new_w = int(w * ratio)
+    new_h = int(h * ratio)
+    return img.resize((new_w, new_h), Image.LANCZOS)
+
+
 def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
-    """Overlay text watermark on a PIL image and return a new RGB image."""
+    """Overlay text watermark on a 1080p-sized PIL image and return a new RGB image.
+    Uses outlined text (contrasting stroke around each letter) so the chosen
+    colour is always readable on any photo background.
+    """
     img = pil_img.convert("RGBA")
     w, h = img.size
 
@@ -182,7 +203,6 @@ def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     margin = max(16, fsize // 2)
-    pad    = max(6, fsize // 6)   # padding around text for background pill
 
     pos_map = {
         "top-left":      (margin, margin),
@@ -197,40 +217,44 @@ def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
     }
     x, y = pos_map.get(position, pos_map["bottom-right"])
 
-    # ── Dark semi-transparent pill behind text ────────────────────────────
-    # Automatically contrasts with any background so text is always readable
-    shadow_a = min(255, int(a * 0.75))
-    draw.rounded_rectangle(
-        [x - pad, y - pad, x + tw + pad, y + th + pad],
-        radius=pad,
-        fill=(0, 0, 0, shadow_a),
-    )
+    # ── Contrasting outline so text is legible on ANY background ──────────
+    # Luminance of chosen colour → pick opposite for the outline stroke
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    if lum < 128:
+        # Dark text → white outline
+        oc = (255, 255, 255, a)
+    else:
+        # Light text → dark outline
+        oc = (0, 0, 0, a)
 
-    # ── Shadow offset for extra legibility ────────────────────────────────
-    shadow_offset = max(1, fsize // 24)
-    draw.text((x + shadow_offset, y + shadow_offset), text,
-              font=font, fill=(0, 0, 0, min(255, a)))
+    stroke_r = max(1, fsize // 20)   # outline thickness scales with font
+    for dx in range(-stroke_r, stroke_r + 1):
+        for dy in range(-stroke_r, stroke_r + 1):
+            if dx == 0 and dy == 0:
+                continue
+            draw.text((x + dx, y + dy), text, font=font, fill=oc)
 
-    # ── Main text ─────────────────────────────────────────────────────────
+    # ── Main text in user's chosen colour ─────────────────────────────────
     draw.text((x, y), text, font=font, fill=(r, g, b, a))
 
     return Image.alpha_composite(img, overlay).convert("RGB")
 
 
 def serve_image_with_watermark(filepath: str, wm: dict):
-    """Open image, apply watermark if enabled, return response with no-cache headers."""
+    """Resize to 1080p, apply watermark if enabled, return no-cache response."""
     img = Image.open(filepath).convert("RGB")
+    # Always normalise to 1080p for consistent watermark size and faster delivery
+    img = _resize_to_1080p(img)
     if wm.get("enabled"):
         img = apply_watermark(img, wm)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=92)
+    img.save(buf, format="JPEG", quality=85)   # compressed for fast delivery
     buf.seek(0)
     resp = send_file(buf, mimetype="image/jpeg")
-    # Prevent browsers from caching guest images (admin served without watermark
-    # would otherwise be reused from cache on the same URL).
+    # No-cache: prevent browsers from reusing admin's (unwatermarked) copies
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
+    resp.headers["Pragma"]        = "no-cache"
+    resp.headers["Expires"]       = "0"
     return resp
 
 
@@ -728,25 +752,34 @@ def save_watermark():
 @app.route("/admin/watermark/preview")
 @admin_required
 def watermark_preview():
-    """Return a sample image with the current watermark for live preview."""
+    """Return a 1920x1080 sample image with the current watermark for live preview.
+    The canvas matches the exact dimensions guests see so font sizes are accurate.
+    """
     wm = get_watermark()
-    # Create a sample gradient image
-    sample = Image.new("RGB", (600, 400))
-    draw = ImageDraw.Draw(sample)
-    for y in range(400):
-        shade = int(60 + (y / 400) * 120)
-        draw.line([(0, y), (600, y)], fill=(shade, shade + 20, shade + 40))
-    # Draw grid lines
-    for x in range(0, 600, 60):
-        draw.line([(x, 0), (x, 400)], fill=(255, 255, 255, 30))
-    for y in range(0, 400, 40):
-        draw.line([(0, y), (600, y)], fill=(255, 255, 255, 30))
+    W, H = 1920, 1080
+    # Build gradient via numpy (fast) — left half bright, right half dark
+    import numpy as np
+    arr = np.zeros((H, W, 3), dtype=np.uint8)
+    t = np.linspace(0, 1, H)[:, None]          # (H, 1)
+    # Left half: bright grey fading darker
+    left_shade = (220 - t * 160).astype(np.uint8)
+    arr[:, :W//2, 0] = left_shade
+    arr[:, :W//2, 1] = left_shade
+    arr[:, :W//2, 2] = np.clip(left_shade.astype(int) + 10, 0, 255).astype(np.uint8)
+    # Right half: dark grey
+    right_shade = (80 - t * 50).astype(np.uint8)
+    arr[:, W//2:, 0] = right_shade
+    arr[:, W//2:, 1] = np.clip(right_shade.astype(int) + 5, 0, 255).astype(np.uint8)
+    arr[:, W//2:, 2] = np.clip(right_shade.astype(int) + 15, 0, 255).astype(np.uint8)
+    sample = Image.fromarray(arr, "RGB")
 
     img = apply_watermark(sample, wm)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=90)
+    img.save(buf, format="JPEG", quality=80)
     buf.seek(0)
-    return send_file(buf, mimetype="image/jpeg")
+    resp = send_file(buf, mimetype="image/jpeg")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
 
 
 @app.route("/admin/change-password", methods=["GET", "POST"])

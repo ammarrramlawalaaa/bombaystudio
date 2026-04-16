@@ -49,5 +49,20 @@
             <i class="bi bi-house me-1"></i>Home
         </a>
     </div>
+
+    {% if needs_verification and verification_candidates %}
+    <div class="modal fade show" id="verificationModalLegacy" tabindex="-1" style="display:block;background:rgba(0,0,0,0.45);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Quick Face Verification</h5>
+                </div>
+                <div class="modal-body">
+                    <img src="{{ url_for('verification_preview', filename=verification_candidates[0]['preview_filename']) }}" class="img-fluid rounded border" alt="verification preview">
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}

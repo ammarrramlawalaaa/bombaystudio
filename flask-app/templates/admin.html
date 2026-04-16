@@ -198,9 +198,39 @@
             {% else %}
             <div class="row g-4">
                 <div class="col-lg-5">
+                    <div class="card p-4 mb-4 border-primary border-opacity-25">
+                        <h5 class="fw-bold mb-3"><i class="bi bi-sliders me-2 text-primary"></i>Lane Settings</h5>
+                        <form method="post" action="{{ url_for('admin') }}">
+                            <input type="hidden" name="action" value="save_runtime_settings">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Processing Mode</label>
+                                <select name="processing_mode" class="form-select">
+                                    <option value="LOCAL" {% if runtime_settings.processing_mode == 'LOCAL' %}selected{% endif %}>LOCAL (Manifest lane)</option>
+                                    <option value="SERVER" {% if runtime_settings.processing_mode == 'SERVER' %}selected{% endif %}>SERVER (Local face recognition)</option>
+                                    <option value="API" {% if runtime_settings.processing_mode == 'API' %}selected{% endif %}>API (AWS Rekognition fallback)</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Storage Lane</label>
+                                <select name="storage_mode" class="form-select">
+                                    <option value="LOCAL_DISK" {% if runtime_settings.storage_mode == 'LOCAL_DISK' %}selected{% endif %}>LOCAL_DISK (/static/uploads)</option>
+                                    <option value="S3_COMPATIBLE" {% if runtime_settings.storage_mode == 'S3_COMPATIBLE' %}selected{% endif %}>S3_COMPATIBLE (R2/B2/S3)</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-outline-primary w-100 fw-semibold" type="submit">
+                                <i class="bi bi-save me-1"></i>Save Lane Settings
+                            </button>
+                        </form>
+                    </div>
+
                     <div class="card p-4">
                         <h5 class="fw-bold mb-3"><i class="bi bi-cloud-upload me-2 text-primary"></i>Bulk Upload</h5>
-                        <form method="post" enctype="multipart/form-data" id="uploadForm">
+                        <form method="post" action="/admin" enctype="multipart/form-data" id="uploadForm">
+                            <div id="uploadLimits"
+                                 data-max-files="{{ upload_max_batch_files }}"
+                                 data-max-bytes="{{ upload_max_batch_bytes }}"
+                                 class="d-none"></div>
+                            <input type="hidden" name="action" value="upload">
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Select Event</label>
                                 <select class="form-select" name="event_id" required>
@@ -214,7 +244,17 @@
                                 <div id="dropLabel"><strong>Click to browse</strong> or drag &amp; drop<br>
                                     <span class="text-muted small">JPG, PNG, WEBP, MP4, MOV</span></div>
                                 <div id="fileCount" class="mt-2 fw-semibold text-primary d-none"></div>
+                                <div id="fileSizeSummary" class="small text-muted d-none"></div>
                                 <ul id="fileList" class="mt-2 list-unstyled text-muted small text-start d-none mb-0" style="max-height:120px;overflow-y:auto;"></ul>
+                            </div>
+                            <div id="uploadProgressWrap" class="d-none mb-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="small fw-semibold">Uploading files</span>
+                                    <span class="small text-muted" id="uploadProgressText">0 B / 0 B</span>
+                                </div>
+                                <div class="progress" style="height:14px;">
+                                    <div class="progress-bar bg-info" id="uploadProgressBar" style="width:0%">0%</div>
+                                </div>
                             </div>
                             <button type="submit" class="btn btn-primary w-100 fw-semibold" id="uploadBtn">
                                 <i class="bi bi-cpu me-2"></i>Upload &amp; Index (Background)
@@ -222,6 +262,7 @@
                         </form>
                         <div class="mt-3 p-3 bg-light rounded small text-muted">
                             <i class="bi bi-info-circle me-1"></i>Already-indexed files are skipped. Videos sampled at 1fps. Runs in the background.
+                            <div class="mt-1">Large uploads are auto-batched (max {{ upload_max_batch_files }} files / {{ (upload_max_batch_bytes // (1024 * 1024)) }}MB per batch).</div>
                         </div>
                     </div>
                 </div>
@@ -478,12 +519,128 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
 <script>
 // ── Drag & drop upload ───────────────────────────────────────────────────────
 const dropZone    = document.getElementById('dropZone');
 const photosInput = document.getElementById('photosInput');
 const fileCountEl = document.getElementById('fileCount');
 const fileListEl  = document.getElementById('fileList');
+const fileSizeSummaryEl = document.getElementById('fileSizeSummary');
+const uploadForm = document.getElementById('uploadForm');
+const uploadBtn = document.getElementById('uploadBtn');
+const uploadProgressWrap = document.getElementById('uploadProgressWrap');
+const uploadProgressBar = document.getElementById('uploadProgressBar');
+const uploadProgressText = document.getElementById('uploadProgressText');
+const uploadLimitsEl = document.getElementById('uploadLimits');
+const MAX_BATCH_FILES = Number(uploadLimitsEl?.dataset.maxFiles || 150);
+const MAX_BATCH_BYTES = Number(uploadLimitsEl?.dataset.maxBytes || 1073741824);
+
+function formatBytes(bytes) {
+    if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unitIdx = 0;
+    while (value >= 1024 && unitIdx < units.length - 1) {
+        value /= 1024;
+        unitIdx += 1;
+    }
+    return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIdx]}`;
+}
+
+function buildUploadBatches(files, maxFiles, maxBytes) {
+    const batches = [];
+    let current = [];
+    let currentBytes = 0;
+
+    for (const f of files) {
+        const size = Number(f.size || 0);
+        const hitCount = current.length >= maxFiles;
+        const hitBytes = current.length > 0 && (currentBytes + size > maxBytes);
+        if (hitCount || hitBytes) {
+            batches.push(current);
+            current = [];
+            currentBytes = 0;
+        }
+        current.push(f);
+        currentBytes += size;
+    }
+    if (current.length) batches.push(current);
+    return batches;
+}
+
+function uploadBatch(batchFiles, eventId, progressCb) {
+    return new Promise((resolve, reject) => {
+        if (!batchFiles || batchFiles.length === 0) {
+            reject({ status: 400, body: 'No files provided' });
+            return;
+        }
+        if (!eventId || String(eventId).trim() === '') {
+            reject({ status: 400, body: 'Event ID is missing' });
+            return;
+        }
+        
+        const fd = new FormData();
+        fd.append('action', 'upload');
+        fd.append('event_id', String(eventId));
+        batchFiles.forEach((f) => fd.append('photos', f));
+
+        const xhr = new XMLHttpRequest();
+        const uploadUrl = uploadForm.action ? uploadForm.action : (window.location.pathname || '/admin');
+        xhr.open('POST', uploadUrl, true);
+        xhr.withCredentials = true;
+        // Mark as AJAX request so server returns JSON instead of redirect
+        xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+        xhr.upload.onprogress = (evt) => {
+            if (evt.lengthComputable) progressCb(evt.loaded, evt.total);
+        };
+
+        xhr.onload = () => {
+            console.log(`[Upload] Response status: ${xhr.status}`);
+            
+            // Try to parse as JSON (for AJAX responses)
+            let response = null;
+            try {
+                response = JSON.parse(xhr.responseText);
+                console.log('[Upload] Parsed JSON response:', response);
+            } catch (e) {
+                // Not JSON, that's OK
+            }
+            
+            // If we got a JSON response with success indicator, use that
+            if (response && response.success === true) {
+                resolve();
+                return;
+            }
+            if (response && response.error) {
+                console.error('[Upload] Server returned error:', response.error);
+                reject({ status: xhr.status || 500, body: response.error });
+                return;
+            }
+            
+            // Otherwise check HTTP status
+            if (xhr.status >= 200 && xhr.status < 400) {
+                resolve();
+                return;
+            }
+            
+            console.error(`[Upload] Status ${xhr.status}:`, xhr.responseText.substring(0, 200));
+            reject({ status: xhr.status, body: xhr.responseText || `HTTP ${xhr.status}` });
+        };
+
+        xhr.onerror = () => {
+            console.error('[Upload] Network error');
+            reject({ status: 0, body: 'network-error' });
+        };
+        xhr.ontimeout = () => {
+            console.error('[Upload] Timeout');
+            reject({ status: 408, body: 'request-timeout' });
+        };
+        xhr.send(fd);
+    });
+}
 
 if (photosInput) {
     photosInput.addEventListener('change', updateFileList);
@@ -492,6 +649,11 @@ if (photosInput) {
         if (!files.length) return;
         fileCountEl.textContent = `${files.length} file(s) selected`;
         fileCountEl.classList.remove('d-none');
+        const totalSize = Array.from(files).reduce((sum, f) => sum + (f.size || 0), 0);
+        if (fileSizeSummaryEl) {
+            fileSizeSummaryEl.textContent = `Total size: ${formatBytes(totalSize)}`;
+            fileSizeSummaryEl.classList.remove('d-none');
+        }
         fileListEl.innerHTML = '';
         Array.from(files).forEach(f => {
             const li = document.createElement('li');
@@ -506,32 +668,168 @@ if (photosInput) {
         e.preventDefault(); dropZone.classList.remove('dragover');
         photosInput.files = e.dataTransfer.files; updateFileList();
     });
-    document.getElementById('uploadForm').addEventListener('submit', () => {
-        const btn = document.getElementById('uploadBtn');
-        if (btn) { btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Uploading…'; btn.disabled = true; }
+    uploadForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        console.log('[Upload] Form submit handler triggered');
+        if (!uploadForm.checkValidity()) {
+            uploadForm.reportValidity();
+            return;
+        }
+        const files = photosInput.files;
+        if (!files || !files.length) {
+            console.log('[Upload] No files selected, submitting form normally');
+            uploadForm.submit();
+            return;
+        }
+        
+        // Check if admin session is still valid before uploading
+        try {
+            const statusResp = await fetch('/admin/status', { credentials: 'include' });
+            if (statusResp.status === 401 || statusResp.status === 403) {
+                alert('Your session has expired. Please log in again.');
+                window.location.href = '/admin/login';
+                return;
+            }
+        } catch (e) {
+            console.warn('[Upload] Could not verify session:', e);
+        }
+        
+        const allFiles = Array.from(files);
+        console.log(`[Upload] Starting upload of ${allFiles.length} file(s)`);
+        const totalBytes = allFiles.reduce((sum, f) => sum + Number(f.size || 0), 0);
+        const eventId = uploadForm.querySelector('select[name="event_id"]')?.value;
+        if (!eventId) {
+            alert('Please select an event first.');
+            return;
+        }
+        console.log(`[Upload] Event ID: ${eventId}, Total size: ${totalBytes} bytes`);
+
+        const batches = buildUploadBatches(allFiles, MAX_BATCH_FILES, MAX_BATCH_BYTES);
+        console.log(`[Upload] Created ${batches.length} batch(es)`);
+        let uploadedBytes = 0;
+
+        if (uploadBtn) {
+            uploadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Uploading 1/${batches.length}…`;
+            uploadBtn.disabled = true;
+        }
+        uploadProgressWrap?.classList.remove('d-none');
+
+        const updateAggregateProgress = (loadedThisBatch, batchTotal) => {
+            const aggregateLoaded = uploadedBytes + Math.min(loadedThisBatch, batchTotal || 0);
+            const pct = totalBytes ? Math.max(0, Math.min(100, Math.round((aggregateLoaded / totalBytes) * 100))) : 0;
+            if (uploadProgressBar) {
+                uploadProgressBar.style.width = `${pct}%`;
+                uploadProgressBar.textContent = `${pct}%`;
+            }
+            if (uploadProgressText) {
+                uploadProgressText.textContent = `${formatBytes(aggregateLoaded)} / ${formatBytes(totalBytes)}`;
+            }
+        };
+
+        (async () => {
+            for (let i = 0; i < batches.length; i++) {
+                const batch = batches[i];
+                const batchBytes = batch.reduce((sum, f) => sum + Number(f.size || 0), 0);
+                console.log(`[Upload] Uploading batch ${i + 1}/${batches.length} with ${batch.length} file(s), ${batchBytes} bytes`);
+                if (uploadBtn) {
+                    uploadBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Uploading ${i + 1}/${batches.length}…`;
+                }
+
+                try {
+                    console.log(`[Upload] Calling uploadBatch for batch ${i + 1}`);
+                    await uploadBatch(batch, eventId, (loaded, total) => updateAggregateProgress(loaded, total));
+                    console.log(`[Upload] Batch ${i + 1} completed successfully`);
+                } catch (err) {
+                    if (uploadBtn) {
+                        uploadBtn.innerHTML = '<i class="bi bi-cpu me-2"></i>Upload &amp; Index (Background)';
+                        uploadBtn.disabled = false;
+                    }
+                    let msg = `Upload failed on batch ${i + 1}/${batches.length}.`;
+                    let details = '';
+                    
+                    if (err && err.status === 413) {
+                        msg += ' Batch too large.';
+                        details = 'You can reduce the batch size or split files into multiple uploads.';
+                    } else if (err && err.status === 400) {
+                        msg += ' Bad request.';
+                        details = err.body ? `Server says: ${err.body.substring(0, 80)}` : 'Invalid request data.';
+                    } else if (err && (err.status === 401 || err.status === 403)) {
+                        msg += ' Not authorized.';
+                        details = 'Your session may have expired. Please refresh and log in again.';
+                    } else if (err && err.status === 408) {
+                        msg += ' Request timeout.';
+                        details = 'Try with smaller batches or check your network connection.';
+                    } else if (err && err.status === 0 || err.body === 'network-error') {
+                        msg += ' Network error.';
+                        details = 'Check your internet connection and try again.';
+                    } else if (err && err.status >= 500) {
+                        msg += ` Server error (${err.status}).`;
+                        details = 'The server encountered an error. Try again in a moment.';
+                    } else if (err && err.body) {
+                        details = err.body.substring(0, 150);
+                    }
+                    
+                    const fullMsg = details ? `${msg}\n\n${details}` : msg;
+                    console.error('[Upload Error]', { status: err?.status, body: err?.body });
+                    alert(fullMsg + '\n\nPlease try again or check the browser console for details.');
+                    return;
+                }
+
+                uploadedBytes += batchBytes;
+                updateAggregateProgress(batchBytes, batchBytes);
+            }
+
+            if (uploadProgressBar) {
+                uploadProgressBar.style.width = '100%';
+                uploadProgressBar.textContent = '100%';
+            }
+            if (uploadProgressText) {
+                uploadProgressText.textContent = `${formatBytes(totalBytes)} / ${formatBytes(totalBytes)}`;
+            }
+            window.location.assign(`${window.location.pathname}#upload`);
+        })();
     });
 }
 
 // ── Progress polling ─────────────────────────────────────────────────────────
 const JOB_ID = "{{ job_id or '' }}";
+
+function renderProgressState(data) {
+    if (!data) return;
+    if (JOB_ID && data.job_id && data.job_id !== JOB_ID) return;
+    const card = document.getElementById('liveJobCard');
+    if (card) card.classList.remove('d-none');
+    const pct = data.percent || 0;
+    const bar = document.getElementById('jobBar');
+    if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+    const st = document.getElementById('jobStatusText');
+    if (st) st.textContent = data.status === 'complete' ? 'Done' : `Processing ${data.done || 0}/${data.total || 0}...`;
+    const ct = document.getElementById('jobCountText');
+    if (ct) ct.textContent = `${data.done || 0}/${data.total || 0} files`;
+    if (data.errors && data.errors.length) {
+        const el = document.getElementById('jobErrors');
+        if (el) el.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
+    }
+    if (data.status === 'complete' && bar) {
+        bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
+        bar.classList.add('bg-success');
+    }
+}
+
+try {
+    const socket = io('/admin', { transports: ['websocket', 'polling'] });
+    socket.on('index_progress', renderProgressState);
+} catch (e) {
+    console.warn('Socket connection failed, polling fallback active');
+}
+
 function pollProgress() {
     if (!JOB_ID) return;
     fetch(`/admin/status?job_id=${JOB_ID}`)
         .then(r => r.json()).then(data => {
             if (data.status === 'idle') return;
-            const card = document.getElementById('liveJobCard');
-            if (card) card.classList.remove('d-none');
-            const pct = data.percent || 0;
+            renderProgressState(data);
             const bar = document.getElementById('jobBar');
-            if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
-            const st = document.getElementById('jobStatusText');
-            if (st) st.textContent = data.status === 'complete' ? '✅ Done!' : 'Indexing…';
-            const ct = document.getElementById('jobCountText');
-            if (ct) ct.textContent = `${data.done}/${data.total} files`;
-            if (data.errors && data.errors.length) {
-                const el = document.getElementById('jobErrors');
-                if (el) el.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
-            }
             if (data.status !== 'complete') setTimeout(pollProgress, 1500);
             else if (bar) { bar.classList.remove('progress-bar-striped','progress-bar-animated'); bar.classList.add('bg-success'); }
         }).catch(() => setTimeout(pollProgress, 3000));

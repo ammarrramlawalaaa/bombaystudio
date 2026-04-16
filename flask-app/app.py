@@ -1,438 +1,126 @@
-import os
-import io
-import pickle
-import random
-import sqlite3
-import string
-import threading
-import uuid
-from functools import wraps
+git rm -r --cached faces.db
+git rm -r --cached uploads/ayscale brightness)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    brightness = float(np.mean(gray))
+    if brightness < 55:
+        return False, "Image is too dark. Please move to better light."
+    if brightness > 235:
+        return False, "Image is too bright. Please avoid harsh light."
 
-import cv2
-import face_recognition
-import numpy as np
-from flask import (
-    Flask, abort, jsonify, redirect, render_template,
-    request, send_file, send_from_directory, session, url_for, flash
-)
-from PIL import Image, ImageDraw, ImageFont
-from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
+    # Blur check using variance of Laplacian
+    blur_score = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    if blur_score < 90:
+        return False, "Image is blurry. Hold still and retake."
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
+    face_locations = face_recognition.face_locations(rgb)
+    if len(face_locations) == 0:
+        return False, "No face detected. Center your face and retake."
+    if len(face_locations) > 1:
+        return False, "Multiple faces detected. Only one face should be visible."
 
-BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
-DB_PATH       = os.path.join(BASE_DIR, "faces.db")
+    top, right, bottom, left = face_locations[0]
+    face_area = max(1, (right - left) * (bottom - top))
+    img_area = max(1, rgb.shape[0] * rgb.shape[1])
+    face_ratio = face_area / img_area
+    if face_ratio < 0.035:
+        return False, "Face is too small. Move closer to the camera."
 
-ALLOWED_IMAGE_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
-ALLOWED_VIDEO_EXT = {"mp4", "mov"}
-ALLOWED_EXTENSIONS = ALLOWED_IMAGE_EXT | ALLOWED_VIDEO_EXT
-
-FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# ─── Background job tracker ────────────────────────────────────────────────────
-_jobs: dict = {}
-_jobs_lock = threading.Lock()
+    return True, "Selfie accepted."
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# DATABASE
-# ══════════════════════════════════════════════════════════════════════════════
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _add_column_if_missing(conn, table, column, definition):
-    try:
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-    except sqlite3.OperationalError:
-        pass
-
-
-def init_db():
-    with get_db() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS admins (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT DEFAULT '',
-                code TEXT NOT NULL UNIQUE,
-                album_min INTEGER DEFAULT 0,
-                album_max INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS faces (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                photo_filename TEXT NOT NULL,
-                encoding BLOB NOT NULL,
-                event_id INTEGER REFERENCES events(id),
-                media_type TEXT DEFAULT 'photo',
-                frame_time REAL DEFAULT 0
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS album_selections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                event_id INTEGER NOT NULL,
-                photo_filename TEXT NOT NULL,
-                selected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(user_id, event_id, photo_filename)
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS watermark_settings (
-                id INTEGER PRIMARY KEY,
-                enabled INTEGER DEFAULT 0,
-                text TEXT DEFAULT 'Bombay Studio',
-                font_size INTEGER DEFAULT 48,
-                opacity INTEGER DEFAULT 60,
-                position TEXT DEFAULT 'bottom-right',
-                color TEXT DEFAULT '#ffffff'
-            )
-        """)
-        # Migrations for existing DBs
-        for col, defn in [
-            ("event_id",   "INTEGER REFERENCES events(id)"),
-            ("media_type", "TEXT DEFAULT 'photo'"),
-            ("frame_time", "REAL DEFAULT 0"),
-        ]:
-            _add_column_if_missing(conn, "faces", col, defn)
-        for col, defn in [
-            ("album_min", "INTEGER DEFAULT 0"),
-            ("album_max", "INTEGER DEFAULT 0"),
-        ]:
-            _add_column_if_missing(conn, "events", col, defn)
-
-        # Default admin
-        if not conn.execute("SELECT id FROM admins LIMIT 1").fetchone():
-            conn.execute(
-                "INSERT INTO admins (username, password_hash) VALUES (?, ?)",
-                ("admin", generate_password_hash("admin123"))
-            )
-        # Default watermark row
-        if not conn.execute("SELECT id FROM watermark_settings LIMIT 1").fetchone():
-            conn.execute("INSERT INTO watermark_settings (id) VALUES (1)")
-        conn.commit()
-
-
-def get_watermark():
-    with get_db() as conn:
-        row = conn.execute("SELECT * FROM watermark_settings WHERE id=1").fetchone()
-    return dict(row) if row else {}
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# WATERMARK
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _get_font(size: int):
-    try:
-        return ImageFont.truetype(FONT_PATH, size)
-    except Exception:
-        return ImageFont.load_default()
-
-
-def _resize_to_1080p(img: Image.Image) -> Image.Image:
-    """Fit image into an exact 1920×1080 canvas (letterboxed, black bars).
-    Every output is exactly 1920×1080 so the watermark always lands in the
-    same spot regardless of the original photo's aspect ratio or resolution.
-    """
-    TARGET_W, TARGET_H = 1920, 1080
-    w, h = img.size
-    ratio = min(TARGET_W / w, TARGET_H / h)
-    new_w = int(w * ratio)
-    new_h = int(h * ratio)
-    resized = img.resize((new_w, new_h), Image.LANCZOS)
-    canvas = Image.new("RGB", (TARGET_W, TARGET_H), (0, 0, 0))
-    offset_x = (TARGET_W - new_w) // 2
-    offset_y = (TARGET_H - new_h) // 2
-    canvas.paste(resized, (offset_x, offset_y))
-    return canvas
-
-
-def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
-    """Overlay text watermark on a 1080p-sized PIL image and return a new RGB image.
-    Uses outlined text (contrasting stroke around each letter) so the chosen
-    colour is always readable on any photo background.
-    """
-    img = pil_img.convert("RGBA")
-    w, h = img.size
-
-    text      = (wm.get("text") or "Bombay Studio").strip() or "Bombay Studio"
-    fsize     = max(10, min(200, int(wm.get("font_size", 48))))
-    opacity   = max(0, min(100, int(wm.get("opacity", 60))))
-    position  = wm.get("position", "bottom-right")
-    color_hex = (wm.get("color") or "#ffffff").lstrip("#").ljust(6, "0")
-
-    r = int(color_hex[0:2], 16)
-    g = int(color_hex[2:4], 16)
-    b = int(color_hex[4:6], 16)
-    a = int(255 * opacity / 100)
-
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    draw    = ImageDraw.Draw(overlay)
-    font    = _get_font(fsize)
-
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    margin = max(16, fsize // 2)
-
-    pos_map = {
-        "top-left":      (margin, margin),
-        "top-center":    ((w - tw) // 2, margin),
-        "top-right":     (w - tw - margin, margin),
-        "center-left":   (margin, (h - th) // 2),
-        "center":        ((w - tw) // 2, (h - th) // 2),
-        "center-right":  (w - tw - margin, (h - th) // 2),
-        "bottom-left":   (margin, h - th - margin),
-        "bottom-center": ((w - tw) // 2, h - th - margin),
-        "bottom-right":  (w - tw - margin, h - th - margin),
-    }
-    x, y = pos_map.get(position, pos_map["bottom-right"])
-
-    # ── Contrasting outline so text is legible on ANY background ──────────
-    # Luminance of chosen colour → pick opposite for the outline stroke
-    lum = 0.299 * r + 0.587 * g + 0.114 * b
-    if lum < 128:
-        # Dark text → white outline
-        oc = (255, 255, 255, a)
-    else:
-        # Light text → dark outline
-        oc = (0, 0, 0, a)
-
-    stroke_r = max(1, fsize // 20)   # outline thickness scales with font
-    for dx in range(-stroke_r, stroke_r + 1):
-        for dy in range(-stroke_r, stroke_r + 1):
-            if dx == 0 and dy == 0:
-                continue
-            draw.text((x + dx, y + dy), text, font=font, fill=oc)
-
-    # ── Main text in user's chosen colour ─────────────────────────────────
-    draw.text((x, y), text, font=font, fill=(r, g, b, a))
-
-    return Image.alpha_composite(img, overlay).convert("RGB")
-
-
-def serve_image_with_watermark(filepath: str, wm: dict):
-    """Resize to 1080p, apply watermark if enabled, return no-cache response."""
-    img = Image.open(filepath).convert("RGB")
-    # Always normalise to 1080p for consistent watermark size and faster delivery
-    img = _resize_to_1080p(img)
-    if wm.get("enabled"):
-        img = apply_watermark(img, wm)
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85)   # compressed for fast delivery
-    buf.seek(0)
-    resp = send_file(buf, mimetype="image/jpeg")
-    # No-cache: prevent browsers from reusing admin's (unwatermarked) copies
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"]        = "no-cache"
-    resp.headers["Expires"]       = "0"
-    return resp
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# AUTH DECORATORS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def login_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("user_id"):
-            flash("Please log in first.", "warning")
-            return redirect(url_for("login", next=request.path))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def admin_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if not session.get("admin_id"):
-            flash("Admin access required.", "danger")
-            return redirect(url_for("admin_login"))
-        return f(*args, **kwargs)
-    return decorated
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ══════════════════════════════════════════════════════════════════════════════
-
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def is_video(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_VIDEO_EXT
-
-def load_image_rgb(filepath):
-    img = cv2.imread(filepath)
-    if img is None:
-        return np.array(Image.open(filepath).convert("RGB"))
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-def generate_event_code():
-    with get_db() as conn:
-        for _ in range(20):
-            code = "".join(random.choices(string.digits, k=5))
-            if not conn.execute("SELECT id FROM events WHERE code=?", (code,)).fetchone():
-                return code
-    return str(random.randint(10000, 99999))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FACE INDEXING
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _file_already_indexed(filename, event_id, conn):
-    return conn.execute(
-        "SELECT id FROM faces WHERE photo_filename=? AND event_id=? LIMIT 1",
-        (filename, event_id)
-    ).fetchone() is not None
-
-
-def extract_and_store_faces(filename, event_id, force=False):
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    with get_db() as conn:
-        if not force and _file_already_indexed(filename, event_id, conn):
-            return 0
-        conn.execute("DELETE FROM faces WHERE photo_filename=? AND event_id=?", (filename, event_id))
-        img = load_image_rgb(filepath)
-        encodings = face_recognition.face_encodings(img)
-        for enc in encodings:
-            conn.execute(
-                "INSERT INTO faces (photo_filename, encoding, event_id, media_type, frame_time) VALUES (?,?,?,'photo',0)",
-                (filename, pickle.dumps(enc), event_id)
-            )
-        conn.commit()
-    return len(encodings)
-
-
-def extract_faces_from_video(filename, event_id, force=False):
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    with get_db() as conn:
-        if not force and _file_already_indexed(filename, event_id, conn):
-            return 0
-        conn.execute("DELETE FROM faces WHERE photo_filename=? AND event_id=?", (filename, event_id))
-        conn.commit()
-
-    cap = cv2.VideoCapture(filepath)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 25
-    frame_interval = max(1, int(fps))
-    frame_idx = total_faces = 0
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        if frame_idx % frame_interval == 0:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            encodings = face_recognition.face_encodings(rgb)
-            t = round(frame_idx / fps, 2)
-            if encodings:
-                with get_db() as conn:
-                    for enc in encodings:
-                        conn.execute(
-                            "INSERT INTO faces (photo_filename, encoding, event_id, media_type, frame_time) VALUES (?,?,?,'video',?)",
-                            (filename, pickle.dumps(enc), event_id, t)
-                        )
-                    conn.commit()
-                total_faces += len(encodings)
-        frame_idx += 1
-
-    cap.release()
-    return total_faces
-
-
-def _run_indexing_job(job_id, file_list, event_id):
-    with app.app_context():
-        total = len(file_list)
-        done = 0
-        errors = []
-        for filename, _path in file_list:
-            try:
-                if is_video(filename):
-                    extract_faces_from_video(filename, event_id)
-                else:
-                    extract_and_store_faces(filename, event_id)
-            except Exception as exc:
-                errors.append(f"{filename}: {exc}")
-            done += 1
-            with _jobs_lock:
-                _jobs[job_id]["done"] = done
-                _jobs[job_id]["errors"] = list(errors)
-        with _jobs_lock:
-            _jobs[job_id]["status"] = "complete"
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FACE SEARCH
-# ══════════════════════════════════════════════════════════════════════════════
-
-def _decode_selfie(selfie_bytes):
-    nparr = np.frombuffer(selfie_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if img is None:
-        img = np.array(Image.open(io.BytesIO(selfie_bytes)).convert("RGB"))
-    else:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    return img
-
-
-def find_matching_photos(selfie_bytes, event_id):
+def find_matching_photos(selfie_bytes, event_id, user_id=None):
     img = _decode_selfie(selfie_bytes)
+    img = _downscale_for_face_work(img)
     encs = face_recognition.face_encodings(img)
     if not encs:
         return None
     selfie_enc = encs[0]
     BATCH = 2000
     matched = set()
-    offset = 0
-    with get_db() as conn:
-        total = conn.execute("SELECT COUNT(*) FROM faces WHERE event_id=?", (event_id,)).fetchone()[0]
-    while offset < total:
+    candidate_by_photo = {}
+
+    handled_face_ids = set()
+    if user_id:
+        with get_db() as conn:
+            handled_rows = conn.execute(
+                "SELECT face_id FROM verification_feedback WHERE user_id=? AND event_id=?",
+                (user_id, event_id),
+            ).fetchall()
+        handled_face_ids = {int(r["face_id"]) for r in handled_rows}
+
+    last_id = 0
+    while True:
         with get_db() as conn:
             rows = conn.execute(
-                "SELECT photo_filename, encoding FROM faces WHERE event_id=? LIMIT ? OFFSET ?",
-                (event_id, BATCH, offset)
+                "SELECT id, photo_filename, encoding, top, right, bottom, left, verified_user_id "
+                "FROM faces WHERE event_id=? AND id>? ORDER BY id LIMIT ?",
+                (event_id, last_id, BATCH),
             ).fetchall()
         if not rows:
             break
         filenames  = [r["photo_filename"] for r in rows]
         enc_matrix = np.array([pickle.loads(r["encoding"]) for r in rows], dtype=np.float64)
         distances  = face_recognition.face_distance(enc_matrix, selfie_enc)
-        for fname, dist in zip(filenames, distances):
-            if dist <= 0.6:
+        for row, fname, dist in zip(rows, filenames, distances):
+            face_id = int(row["id"])
+            if user_id and (face_id in handled_face_ids or int(row["verified_user_id"] or 0) == int(user_id)):
+                continue
+
+            dist = float(dist)
+            if dist <= 0.45:
                 matched.add(fname)
-        offset += BATCH
-    return sorted(matched)
+                continue
+            if dist <= 0.60:
+                top = int(row["top"] or 0)
+                right = int(row["right"] or 0)
+                bottom = int(row["bottom"] or 0)
+                left = int(row["left"] or 0)
+                coords = (top, right, bottom, left)
+                try:
+                    preview_filename = create_highlight_preview(
+                        os.path.join(UPLOAD_FOLDER, fname),
+                        coords,
+                        cache_dir=VERIFICATION_CACHE_DIR,
+                        key=f"{event_id}_{row['id']}",
+                    )
+                except Exception:
+                    preview_filename = None
+
+                if not preview_filename:
+                    continue
+
+                existing = candidate_by_photo.get(fname)
+                if existing is None or dist < existing["distance"]:
+                    candidate_by_photo[fname] = {
+                        "face_id": face_id,
+                        "photo_filename": fname,
+                        "distance": dist,
+                        "event_id": int(event_id),
+                        "preview_filename": preview_filename,
+                    }
+        last_id = rows[-1]["id"]
+
+    verification_candidates = sorted(candidate_by_photo.values(), key=lambda c: c["distance"])[:8]
+    return {
+        "matched": sorted(matched),
+        "needs_verification": bool(verification_candidates),
+        "verification_candidates": verification_candidates,
+    }
+
+
+@app.route("/validate-selfie", methods=["POST"])
+@login_required
+def validate_selfie():
+    selfie = request.files.get("selfie")
+    if not selfie or not selfie.filename:
+        return jsonify({"ok": False, "error": "Please capture or upload a selfie."}), 400
+
+    ext = selfie.filename.rsplit(".", 1)[-1].lower() if "." in selfie.filename else "jpg"
+    if ext not in ALLOWED_IMAGE_EXT:
+        return jsonify({"ok": False, "error": "Unsupported image format."}), 400
+
+    ok, message = _validate_selfie_quality(selfie.read())
+    return jsonify({"ok": ok, "error": message if not ok else None, "message": message})
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -528,43 +216,106 @@ def admin_logout():
 @admin_required
 def admin():
     if request.method == "POST":
+        action = request.form.get("action", "upload")
+        if action == "save_runtime_settings":
+            processing_mode = request.form.get("processing_mode", "SERVER")
+            storage_mode = request.form.get("storage_mode", "LOCAL_DISK")
+            settings = set_runtime_settings(processing_mode, storage_mode)
+            flash(
+                f"Settings saved. Processing={settings['processing_mode']}, Storage={settings['storage_mode']}",
+                "success",
+            )
+            return redirect(url_for("admin") + "#upload")
+
         event_id = request.form.get("event_id", type=int)
         if not event_id:
-            flash("Select an event first.", "danger")
+            error_msg = "Select an event first."
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"error": error_msg}), 400
+            flash(error_msg, "danger")
             return redirect(url_for("admin") + "#upload")
+            
         files = request.files.getlist("photos")
         if not files or all(f.filename == "" for f in files):
-            flash("No files selected.", "danger")
+            error_msg = "No files selected."
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"error": error_msg}), 400
+            flash(error_msg, "danger")
+            return redirect(url_for("admin") + "#upload")
+
+        non_empty_files = [f for f in files if f and f.filename]
+        if len(non_empty_files) > MAX_UPLOAD_BATCH_FILES:
+            error_msg = (
+                f"Too many files in one request ({len(non_empty_files)}). "
+                f"Please upload up to {MAX_UPLOAD_BATCH_FILES} files per batch."
+            )
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"error": error_msg}), 413
+            flash(error_msg, "warning")
+            return redirect(url_for("admin") + "#upload")
+
+        req_size = int(request.content_length or 0)
+        if req_size and req_size > MAX_UPLOAD_BATCH_BYTES:
+            max_mb = MAX_UPLOAD_BATCH_BYTES // (1024 * 1024)
+            got_mb = req_size // (1024 * 1024)
+            error_msg = (
+                f"Upload batch too large ({got_mb}MB). Keep each batch under about {max_mb}MB."
+            )
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return jsonify({"error": error_msg}), 413
+            flash(error_msg, "warning")
             return redirect(url_for("admin") + "#upload")
 
         saved, skipped, bad_ext = [], [], []
+        storage = get_storage()
         for f in files:
             if not f or not f.filename:
                 continue
             if not allowed_file(f.filename):
                 bad_ext.append(f.filename); continue
             filename  = secure_filename(f.filename)
-            save_path = os.path.join(UPLOAD_FOLDER, filename)
-            f.save(save_path)
+            try:
+                object_key, save_path = storage.save_upload(f, filename)
+                filename = object_key
+            except Exception as exc:
+                bad_ext.append(f"{filename} (store error: {exc})")
+                continue
             with get_db() as conn:
                 if _file_already_indexed(filename, event_id, conn):
                     skipped.append(filename); continue
             saved.append((filename, save_path))
 
+        # Check if this is an AJAX request
+        is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        
         for n in bad_ext:
-            flash(f"{n}: unsupported type.", "warning")
+            if not is_ajax:
+                flash(f"{n}: unsupported type.", "warning")
         if skipped:
-            flash(f"{len(skipped)} already indexed — skipped.", "info")
+            if not is_ajax:
+                flash(f"{len(skipped)} already indexed — skipped.", "info")
         if not saved:
-            flash("Nothing new to index.", "info")
+            error_msg = "Nothing new to index."
+            if is_ajax:
+                return jsonify({"error": error_msg}), 400
+            flash(error_msg, "info")
             return redirect(url_for("admin"))
 
-        job_id = str(uuid.uuid4())
-        with _jobs_lock:
-            _jobs[job_id] = {"total": len(saved), "done": 0, "errors": [], "status": "running"}
+        job_id = _enqueue_indexing_files(saved, event_id)
         session["current_job_id"] = job_id
-        threading.Thread(target=_run_indexing_job, args=(job_id, saved, event_id), daemon=True).start()
-        flash(f"Indexing {len(saved)} file(s) in background.", "info")
+        
+        if is_ajax:
+            # Return JSON for AJAX requests
+            return jsonify({
+                "success": True,
+                "job_id": job_id,
+                "files_queued": len(saved),
+                "files_skipped": len(skipped),
+                "files_invalid": len(bad_ext)
+            }), 200
+        
+        # Return redirect for regular form submissions
+        flash(f"Queued {len(saved)} file(s). Upload can continue while indexing runs in background.", "info")
         return redirect(url_for("admin"))
 
     with get_db() as conn:
@@ -588,6 +339,7 @@ def admin():
         """).fetchall()
 
     wm = get_watermark()
+    runtime_settings = get_runtime_settings()
     job_id = session.get("current_job_id")
     current_job = None
     if job_id:
@@ -597,7 +349,10 @@ def admin():
     return render_template("admin.html",
         events=events, photos=photos, users=users,
         selections=selections, wm=wm,
-        current_job=current_job, job_id=job_id)
+        current_job=current_job, job_id=job_id,
+        runtime_settings=runtime_settings,
+        upload_max_batch_files=MAX_UPLOAD_BATCH_FILES,
+        upload_max_batch_bytes=MAX_UPLOAD_BATCH_BYTES)
 
 
 @app.route("/admin/status")
@@ -741,7 +496,17 @@ def save_watermark():
 
     with get_db() as conn:
         conn.execute(
-            "UPDATE watermark_settings SET enabled=?, text=?, font_size=?, opacity=?, position=?, color=? WHERE id=1",
+            """
+            INSERT INTO watermark_settings (id, enabled, text, font_size, opacity, position, color)
+            VALUES (1, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                enabled=excluded.enabled,
+                text=excluded.text,
+                font_size=excluded.font_size,
+                opacity=excluded.opacity,
+                position=excluded.position,
+                color=excluded.color
+            """,
             (enabled, text, font_size, opacity, position, color)
         )
         conn.commit()
@@ -822,6 +587,8 @@ def guest():
     matched  = []
     error_msg = None
     event    = None
+    needs_verification = False
+    verification_candidates = []
 
     event_code = (
         request.form.get("event_code", "").strip()
@@ -866,11 +633,13 @@ def guest():
                     error_msg = "Unsupported format. Use JPG, PNG, or WEBP."
                 else:
                     try:
-                        result = find_matching_photos(selfie.read(), event["id"])
+                        result = find_matching_photos(selfie.read(), event["id"], session.get("user_id"))
                         if result is None:
                             error_msg = "No face detected. Try a clearer, well-lit photo."
                         else:
-                            matched = result
+                            matched = result.get("matched", [])
+                            needs_verification = bool(result.get("needs_verification"))
+                            verification_candidates = result.get("verification_candidates", [])
                             searched = True
                             session["matched_photos"] = matched
                     except Exception as exc:
@@ -886,7 +655,70 @@ def guest():
         count=len(matched),
         error_msg=error_msg,
         current_album=current_album,
+        needs_verification=needs_verification,
+        verification_candidates=verification_candidates,
     )
+
+
+@app.route("/verification-preview/<filename>")
+@login_required
+def verification_preview(filename):
+    return send_from_directory(VERIFICATION_CACHE_DIR, secure_filename(filename))
+
+
+@app.route("/verify-match", methods=["POST"])
+@login_required
+def verify_match():
+    data = request.get_json(silent=True) or {}
+    face_id = data.get("face_id")
+    event_id = data.get("event_id")
+    photo_filename = secure_filename((data.get("photo_filename") or "").strip())
+    decision = (data.get("decision") or "yes").strip().lower()
+
+    try:
+        face_id = int(face_id)
+        event_id = int(event_id)
+    except Exception:
+        return jsonify({"ok": False, "msg": "Invalid verification payload."}), 400
+
+    if decision not in {"yes", "skip"}:
+        return jsonify({"ok": False, "msg": "Invalid decision."}), 400
+
+    uid = session.get("user_id")
+    if not uid or not photo_filename:
+        return jsonify({"ok": False, "msg": "Missing user or photo."}), 400
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id, photo_filename, event_id FROM faces WHERE id=? AND event_id=? AND photo_filename=? LIMIT 1",
+            (face_id, event_id, photo_filename),
+        ).fetchone()
+        if not row:
+            return jsonify({"ok": False, "msg": "Face record not found."}), 404
+
+        if decision == "yes":
+            conn.execute(
+                "UPDATE faces SET verified=1, verified_user_id=?, verified_at=CURRENT_TIMESTAMP WHERE id=?",
+                (uid, face_id),
+            )
+            conn.execute(
+                "INSERT OR IGNORE INTO album_selections (user_id, event_id, photo_filename) VALUES (?,?,?)",
+                (uid, event_id, photo_filename),
+            )
+
+        conn.execute(
+            "INSERT INTO verification_feedback (user_id, face_id, event_id, decision) VALUES (?,?,?,?) "
+            "ON CONFLICT(user_id, face_id) DO UPDATE SET decision=excluded.decision, created_at=CURRENT_TIMESTAMP",
+            (uid, face_id, event_id, decision),
+        )
+        conn.commit()
+
+    if decision == "yes":
+        matched = set(session.get("matched_photos", []))
+        matched.add(photo_filename)
+        session["matched_photos"] = sorted(matched)
+
+    return jsonify({"ok": True, "photo_filename": photo_filename, "decision": decision})
 
 
 @app.route("/album/submit", methods=["POST"])
@@ -934,14 +766,29 @@ def album_submit():
 def uploaded_file(filename):
     filename = secure_filename(filename)
     filepath = os.path.join(UPLOAD_FOLDER, filename)
-    if not os.path.exists(filepath):
-        abort(404)
 
     if session.get("admin_id"):
-        return send_from_directory(UPLOAD_FOLDER, filename)
+        if os.path.exists(filepath):
+            return send_from_directory(UPLOAD_FOLDER, filename)
+        storage = get_storage()
+        if storage.mode == "S3_COMPATIBLE":
+            try:
+                return redirect(storage.generate_private_url(filename, expires_seconds=300))
+            except Exception:
+                abort(404)
+        abort(404)
 
+    if not session.get("user_id"):
+        abort(403)
+
+    storage = get_storage()
+    file_exists_locally = os.path.exists(filepath)
+
+    if not file_exists_locally and storage.mode != "S3_COMPATIBLE":
+        abort(404)
+
+    # Enforce guest authorization before serving local or signed cloud URL.
     matched = session.get("matched_photos", [])
-    # Also allow if it's in the user's album selection
     uid = session.get("user_id")
     in_album = False
     if uid:
@@ -954,6 +801,15 @@ def uploaded_file(filename):
     if filename not in matched and not in_album:
         abort(403)
 
+    if not file_exists_locally and storage.mode == "S3_COMPATIBLE":
+        try:
+            return redirect(storage.generate_private_url(filename, expires_seconds=300))
+        except Exception:
+            abort(404)
+
+    if not file_exists_locally:
+        abort(404)
+
     # Apply watermark for guests
     wm = get_watermark()
     ext = filename.rsplit(".", 1)[-1].lower()
@@ -962,7 +818,54 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 
+def _handle_ftp_new_image(path: str):
+    """Background callback for FTP watcher lane."""
+    try:
+        filename = secure_filename(os.path.basename(path))
+        target_path = os.path.join(UPLOAD_FOLDER, filename)
+        if os.path.abspath(path) != os.path.abspath(target_path):
+            with open(path, "rb") as src, open(target_path, "wb") as dst:
+                dst.write(src.read())
+
+        # Trigger lane processing. Event assignment is optional via env.
+        event_id = int(os.environ.get("FTP_DEFAULT_EVENT_ID", "0") or 0)
+        settings = get_runtime_settings()
+        if settings["processing_mode"] == "SERVER" and event_id:
+            extract_and_store_faces(filename, event_id)
+        else:
+            get_processor().process_image(target_path)
+
+        if get_storage().mode == "S3_COMPATIBLE":
+            get_storage().store_file(target_path, filename)
+    except Exception as exc:
+        print(f"FTP watcher error for {path}: {exc}")
+
+
 if __name__ == "__main__":
     init_db()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    refresh_runtime_services()
+
+    # If PORT is not explicitly provided and 5000 is occupied,
+    # auto-pick a free local port so `python3 app.py` still boots.
+    requested_port = int(os.environ.get("PORT", 5000))
+    port = requested_port
+    if "PORT" not in os.environ:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("0.0.0.0", requested_port))
+        except OSError:
+            probe.close()
+            probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            probe.bind(("0.0.0.0", 0))
+            port = probe.getsockname()[1]
+            print(f"Port {requested_port} is busy, using {port} instead.")
+        finally:
+            probe.close()
+
+    if os.environ.get("FTP_WATCH_ENABLED", "0") == "1":
+        watch_dir = os.environ.get("FTP_WATCH_DIR", os.path.join(BASE_DIR, "ftp_drop"))
+        watcher = FTPFolderWatcher(watch_dir=watch_dir, on_new_image=_handle_ftp_new_image)
+        start_watcher_thread(watcher)
+
+    socketio.run(app, host="0.0.0.0", port=port, debug=False)

@@ -60,6 +60,24 @@
     color: #fff; font-size: 0.7rem; font-weight: 700; letter-spacing: 1px;
     padding: 2px 10px; position: absolute; top: 0; right: 0; border-bottom-left-radius: 8px; z-index: 5;
 }
+
+/* Guest selfie camera */
+#guestCameraStream { width: 100%; border-radius: 10px; background: #000; max-height: 400px; }
+#guestCapturedImage { width: 100%; border-radius: 10px; }
+.lighting-badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px;
+    border-radius: 20px; font-weight: 600; font-size: 0.9rem;
+}
+.lighting-good { background: #d1fae5; color: #065f46; }
+.lighting-warn { background: #fef3c7; color: #92400e; }
+.lighting-bad  { background: #fee2e2; color: #7f1d1d; }
+.lighting-indicator { width: 10px; height: 10px; border-radius: 50%; animation: pulse 2s infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+.camera-overlay {
+    position: absolute; left: 12px; right: 12px; bottom: 12px;
+    background: rgba(0,0,0,0.7); color: #fff; padding: 10px; border-radius: 8px;
+}
+.camera-wrap { position: relative; }
 </style>
 {% endblock %}
 
@@ -142,13 +160,21 @@
                     </div>
 
                     <!-- Step 2: Selfie -->
-                    <div class="mb-3 {% if not event %}opacity-50{% endif %}">
+                    <div class="mb-3">
                         <label for="selfie" class="form-label fw-semibold">
                             <span class="badge bg-primary rounded-circle me-1">2</span> Upload Your Selfie
                         </label>
                         <input type="file" class="form-control" id="selfie" name="selfie"
                                accept="image/*" {% if not event %}disabled{% else %}required{% endif %}>
                         <div class="form-text">Clear, well-lit frontal photo works best.</div>
+                        <button type="button" class="btn btn-outline-primary w-100 mt-2"
+                                id="openGuestCameraBtn"
+                                data-bs-toggle="modal" data-bs-target="#guestCameraModal">
+                            <i class="bi bi-camera-fill me-1"></i>Take Selfie With Camera
+                        </button>
+                        {% if not event %}
+                        <div class="form-text">You can capture your selfie now, then add event code to search.</div>
+                        {% endif %}
                     </div>
 
                     {% if event %}
@@ -294,6 +320,55 @@
     </div>
 </div>
 
+<!-- ── Guest Camera Modal ─────────────────────────────────────────────────── -->
+<div class="modal fade" id="guestCameraModal" tabindex="-1" aria-labelledby="guestCameraModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold" id="guestCameraModalLabel"><i class="bi bi-camera me-2 text-primary"></i>Take Your Selfie</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="guestCameraLiveView">
+                    <div class="camera-wrap">
+                        <video id="guestCameraStream" autoplay playsinline></video>
+                        <canvas id="guestCameraCanvas" class="d-none"></canvas>
+                        <div class="camera-overlay">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span id="guestFaceStatus" class="small"><i class="bi bi-hourglass-split me-1"></i>Starting camera...</span>
+                                <span id="guestLightingBadge" class="lighting-badge lighting-warn d-none">
+                                    <span class="lighting-indicator"></span>
+                                    <span id="guestLightingText">Checking light</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="small text-muted mt-2"><i class="bi bi-lightbulb me-1"></i>Face the light source and keep one face in frame.</div>
+                    <div class="d-flex gap-2 mt-3">
+                        <button type="button" class="btn btn-primary flex-grow-1" id="guestCaptureBtn" disabled>
+                            <i class="bi bi-camera-fill me-1"></i>Capture
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    </div>
+                </div>
+
+                <div id="guestCameraReviewView" class="d-none">
+                    <img id="guestCapturedImage" alt="Selfie preview" class="mb-3">
+                    <div id="guestValidationMessage" class="alert alert-info mb-3">
+                        <i class="bi bi-hourglass-split me-1"></i>Validating selfie quality...
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-primary" id="guestRetakeBtn">Retake</button>
+                        <button type="button" class="btn btn-success flex-grow-1" id="guestUseSelfieBtn" disabled>
+                            <i class="bi bi-check-circle me-1"></i>Use This Selfie
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ── Floating: Request Basket ──────────────────────────────────────────── -->
 <div class="float-bar" id="basketBar">
     <i class="bi bi-bag-fill text-warning"></i>
@@ -359,6 +434,27 @@
         </div>
     </div>
 </div>
+
+<!-- ── Human Verification Modal ──────────────────────────────────────────── -->
+<div class="modal fade" id="verificationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold"><i class="bi bi-shield-check me-2 text-primary"></i>Quick Face Verification</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2">This match is close but not definitive. Please confirm:</p>
+                <img id="verificationPreviewImg" class="w-100 rounded border mb-2" alt="Highlighted face preview">
+                <div class="small text-muted" id="verificationDistanceText"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="verificationNoBtn">No, skip this</button>
+                <button type="button" class="btn btn-primary" id="verificationYesBtn">Yes, that's me</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -368,6 +464,8 @@ const EVENT_ID   = {{ event.id if event else 'null' }};
 const ALBUM_MIN  = {{ event.album_min if event else 0 }};
 const ALBUM_MAX  = {{ event.album_max if event else 0 }};
 const PRE_ALBUM  = {{ current_album | tojson }};  // already-selected filenames
+const NEEDS_VERIFICATION = {{ 'true' if needs_verification else 'false' }};
+const VERIFICATION_CANDIDATES = {{ verification_candidates | tojson }};
 
 // ── Selfie preview ───────────────────────────────────────────────────────────
 const selfieInput = document.getElementById('selfie');
@@ -628,5 +726,263 @@ albumModeBtn?.addEventListener('click', () => {
 
 // In normal mode, show checkboxes via Select All btn click
 selectAllBtn?.addEventListener('click', () => { if (mode === 'normal') showCheckboxes(true); });
+
+// ── Human-in-the-loop verification flow ────────────────────────────────────
+const verificationModalEl = document.getElementById('verificationModal');
+const verificationPreviewImg = document.getElementById('verificationPreviewImg');
+const verificationDistanceText = document.getElementById('verificationDistanceText');
+const verificationYesBtn = document.getElementById('verificationYesBtn');
+const verificationNoBtn = document.getElementById('verificationNoBtn');
+const verificationModal = verificationModalEl ? bootstrap.Modal.getOrCreateInstance(verificationModalEl) : null;
+let verificationIndex = 0;
+
+function renderVerificationCandidate() {
+    if (!verificationModal || verificationIndex >= VERIFICATION_CANDIDATES.length) {
+        verificationModal?.hide();
+        return;
+    }
+    const c = VERIFICATION_CANDIDATES[verificationIndex];
+    if (!c.preview_filename) {
+        verificationIndex += 1;
+        renderVerificationCandidate();
+        return;
+    }
+    if (verificationPreviewImg) {
+        verificationPreviewImg.src = `/verification-preview/${encodeURIComponent(c.preview_filename)}`;
+    }
+    if (verificationDistanceText) {
+        verificationDistanceText.textContent = `Match distance: ${Number(c.distance).toFixed(3)} (verification band)`;
+    }
+}
+
+async function verifyCurrentCandidate(accept) {
+    if (verificationIndex >= VERIFICATION_CANDIDATES.length) return;
+    const c = VERIFICATION_CANDIDATES[verificationIndex];
+
+    if (accept) {
+        try {
+            const res = await fetch('/verify-match', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    face_id: c.face_id,
+                    event_id: c.event_id,
+                    photo_filename: c.photo_filename,
+                    decision: 'yes',
+                }),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+                alert(data.msg || 'Verification failed.');
+            }
+        } catch (_) {
+            alert('Network error during verification.');
+        }
+    } else {
+        try {
+            await fetch('/verify-match', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    face_id: c.face_id,
+                    event_id: c.event_id,
+                    photo_filename: c.photo_filename,
+                    decision: 'skip',
+                }),
+            });
+        } catch (_) {
+            // Ignore skip persistence errors; continue UX flow.
+        }
+    }
+
+    verificationIndex += 1;
+    if (verificationIndex < VERIFICATION_CANDIDATES.length) {
+        renderVerificationCandidate();
+    } else {
+        verificationModal?.hide();
+        location.reload();
+    }
+}
+
+verificationYesBtn?.addEventListener('click', () => verifyCurrentCandidate(true));
+verificationNoBtn?.addEventListener('click', () => verifyCurrentCandidate(false));
+
+if (NEEDS_VERIFICATION && VERIFICATION_CANDIDATES.length) {
+    renderVerificationCandidate();
+    verificationModal?.show();
+}
+
+// ── Guest camera capture + validation ───────────────────────────────────────
+const guestCameraModal = document.getElementById('guestCameraModal');
+const guestCameraStreamEl = document.getElementById('guestCameraStream');
+const guestCameraCanvas = document.getElementById('guestCameraCanvas');
+const guestCaptureBtn = document.getElementById('guestCaptureBtn');
+const guestLiveView = document.getElementById('guestCameraLiveView');
+const guestReviewView = document.getElementById('guestCameraReviewView');
+const guestCapturedImage = document.getElementById('guestCapturedImage');
+const guestRetakeBtn = document.getElementById('guestRetakeBtn');
+const guestUseSelfieBtn = document.getElementById('guestUseSelfieBtn');
+const guestValidationMessage = document.getElementById('guestValidationMessage');
+const guestFaceStatus = document.getElementById('guestFaceStatus');
+const guestLightingBadge = document.getElementById('guestLightingBadge');
+const guestLightingText = document.getElementById('guestLightingText');
+
+let guestMediaStream = null;
+let guestCapturedBlob = null;
+
+function stopGuestStream() {
+    if (guestMediaStream) {
+        guestMediaStream.getTracks().forEach(track => track.stop());
+        guestMediaStream = null;
+    }
+}
+
+function updateGuestLightIndicator(brightness) {
+    let label = 'Good light';
+    let cls = 'lighting-good';
+    let icon = 'bi-check-circle';
+
+    if (brightness < 55) {
+        label = 'Too dark';
+        cls = 'lighting-bad';
+        icon = 'bi-exclamation-triangle';
+    } else if (brightness > 235) {
+        label = 'Too bright';
+        cls = 'lighting-warn';
+        icon = 'bi-exclamation-circle';
+    }
+
+    guestLightingBadge?.classList.remove('d-none', 'lighting-good', 'lighting-warn', 'lighting-bad');
+    guestLightingBadge?.classList.add(cls);
+    if (guestLightingBadge) guestLightingBadge.classList.remove('d-none');
+    if (guestLightingText) guestLightingText.textContent = `${label} (${Math.round(brightness)})`;
+    if (guestFaceStatus) guestFaceStatus.innerHTML = `<i class="bi ${icon} me-1"></i>${label}. Hold still and capture.`;
+}
+
+function startGuestLightingLoop() {
+    if (!guestCameraStreamEl || !guestCameraCanvas || !guestMediaStream) return;
+
+    const ctx = guestCameraCanvas.getContext('2d');
+    const tick = () => {
+        if (!guestMediaStream) return;
+        const w = guestCameraStreamEl.videoWidth || 640;
+        const h = guestCameraStreamEl.videoHeight || 360;
+        guestCameraCanvas.width = w;
+        guestCameraCanvas.height = h;
+
+        try {
+            ctx.drawImage(guestCameraStreamEl, 0, 0, w, h);
+            const imageData = ctx.getImageData(0, 0, w, h).data;
+            let brightness = 0;
+            for (let i = 0; i < imageData.length; i += 4) {
+                brightness += (imageData[i] + imageData[i + 1] + imageData[i + 2]) / 3;
+            }
+            brightness = brightness / (w * h);
+            updateGuestLightIndicator(brightness);
+        } catch (_) {
+            // Ignore transient draw errors while camera initializes.
+        }
+        requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+}
+
+async function validateGuestSelfie(blob) {
+    if (!guestValidationMessage || !guestUseSelfieBtn) return;
+    guestValidationMessage.className = 'alert alert-info mb-3';
+    guestValidationMessage.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>Validating selfie quality...';
+    guestUseSelfieBtn.disabled = true;
+
+    try {
+        const fd = new FormData();
+        fd.append('selfie', blob, 'selfie.jpg');
+        const res = await fetch('/validate-selfie', { method: 'POST', body: fd });
+        const data = await res.json();
+
+        if (data.ok) {
+            guestValidationMessage.className = 'alert alert-success mb-3';
+            guestValidationMessage.innerHTML = '<i class="bi bi-check-circle me-1"></i>Selfie approved. Use it to search now.';
+            guestUseSelfieBtn.disabled = false;
+            return;
+        }
+
+        guestValidationMessage.className = 'alert alert-warning mb-3';
+        guestValidationMessage.innerHTML = `<i class="bi bi-exclamation-triangle me-1"></i>${data.error || data.message || 'Selfie quality is not good enough.'}`;
+    } catch (_) {
+        guestValidationMessage.className = 'alert alert-danger mb-3';
+        guestValidationMessage.innerHTML = '<i class="bi bi-x-octagon me-1"></i>Could not validate selfie. Please retake.';
+    }
+}
+
+if (guestCameraModal) {
+    guestCameraModal.addEventListener('show.bs.modal', async () => {
+        guestCapturedBlob = null;
+        guestLiveView?.classList.remove('d-none');
+        guestReviewView?.classList.add('d-none');
+        if (guestCaptureBtn) guestCaptureBtn.disabled = true;
+
+        try {
+            guestMediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+            if (guestCameraStreamEl) {
+                guestCameraStreamEl.srcObject = guestMediaStream;
+                await guestCameraStreamEl.play();
+            }
+            if (guestCaptureBtn) guestCaptureBtn.disabled = false;
+            startGuestLightingLoop();
+        } catch (_) {
+            if (guestFaceStatus) guestFaceStatus.innerHTML = '<i class="bi bi-x-circle me-1"></i>Camera access denied or unavailable.';
+        }
+    });
+
+    guestCameraModal.addEventListener('hidden.bs.modal', () => {
+        stopGuestStream();
+        if (guestCameraStreamEl) guestCameraStreamEl.srcObject = null;
+    });
+}
+
+guestCaptureBtn?.addEventListener('click', () => {
+    if (!guestCameraStreamEl || !guestCameraCanvas) return;
+    const w = guestCameraStreamEl.videoWidth || 640;
+    const h = guestCameraStreamEl.videoHeight || 360;
+    guestCameraCanvas.width = w;
+    guestCameraCanvas.height = h;
+    const ctx = guestCameraCanvas.getContext('2d');
+    ctx.drawImage(guestCameraStreamEl, 0, 0, w, h);
+
+    guestCameraCanvas.toBlob(async (blob) => {
+        if (!blob) return;
+        guestCapturedBlob = blob;
+        if (guestCapturedImage) guestCapturedImage.src = URL.createObjectURL(blob);
+        guestLiveView?.classList.add('d-none');
+        guestReviewView?.classList.remove('d-none');
+        await validateGuestSelfie(blob);
+    }, 'image/jpeg', 0.95);
+});
+
+guestRetakeBtn?.addEventListener('click', () => {
+    guestCapturedBlob = null;
+    guestReviewView?.classList.add('d-none');
+    guestLiveView?.classList.remove('d-none');
+    if (guestUseSelfieBtn) guestUseSelfieBtn.disabled = true;
+});
+
+guestUseSelfieBtn?.addEventListener('click', () => {
+    if (!guestCapturedBlob || !selfieInput) return;
+
+    const dt = new DataTransfer();
+    dt.items.add(new File([guestCapturedBlob], 'camera-selfie.jpg', { type: 'image/jpeg' }));
+    selfieInput.files = dt.files;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = document.getElementById('selfiePreview');
+        const wrap = document.getElementById('selfiePreviewWrap');
+        if (img) img.src = e.target.result;
+        if (wrap) wrap.classList.remove('d-none');
+    };
+    reader.readAsDataURL(guestCapturedBlob);
+
+    bootstrap.Modal.getInstance(guestCameraModal)?.hide();
+});
 </script>
 {% endblock %}

@@ -27,6 +27,23 @@ node_modules
 !.vscode/launch.json
 !.vscode/extensions.json
 
+# Ignore the Database
+*.db
+faces.db
+
+# Ignore Uploaded Photos
+uploads/
+static/uploads/
+
+# Ignore Python stuff
+venv/
+__pycache__/
+*.pyc
+
+# Ignore environment secrets
+.env
+
+
 # misc
 /.sass-cache
 /connect.lock

@@ -20,13 +20,24 @@
 }
 .r-tick {
     position: absolute; top: 8px; left: 8px; z-index: 10;
-    width: 26px; height: 26px; background: #4f46e5; border-radius: 50%;
+    width: 24px; height: 24px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    color: #fff; font-size: 0.85rem;
-    opacity: 0; transition: opacity 0.15s;
+    font-size: 0.8rem; opacity: 0; transition: all 0.15s ease;
     pointer-events: none;
+    /* Default hidden state */
+    background: rgba(255,255,255,0.9);
+    border: 2px solid rgba(100,100,100,0.4);
+    color: transparent;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.15);
 }
-.album-mode .r-card.album-selected .r-tick { opacity: 1; }
+/* In album mode: show empty circle on every card */
+.album-mode .r-tick { opacity: 1; }
+/* Selected: filled purple with checkmark */
+.album-mode .r-card.album-selected .r-tick {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: #fff;
+}
 /* Regular checkbox for request basket */
 .r-cb {
     position: absolute; top: 8px; left: 8px; z-index: 10;
@@ -222,13 +233,24 @@
                     </div>
                 </div>
 
-                <!-- Album mode counter bar -->
-                {% if event and (event.album_min or event.album_max) %}
-                <div id="albumCounter" class="alert alert-info py-2 small mb-3 d-none">
-                    <i class="bi bi-info-circle me-1"></i>
-                    <span id="albumCounterText"></span>
-                    {% if event.album_min %} · Minimum: <strong>{{ event.album_min }}</strong>{% endif %}
-                    {% if event.album_max %} · Maximum: <strong>{{ event.album_max }}</strong>{% endif %}
+                <!-- Album mode counter bar (always rendered, shown via JS) -->
+                {% if event %}
+                <div id="albumCounter" class="d-none mb-3">
+                    <div class="d-flex align-items-center gap-3 p-2 rounded-3"
+                         style="background:#f0f0ff;border:1.5px solid #c7c2fa;">
+                        <i class="bi bi-collection-fill text-primary fs-5"></i>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold" id="albumCounterMain" style="font-size:0.95rem;"></div>
+                            <div class="text-muted small" id="albumCounterSub"></div>
+                        </div>
+                        {% if event.album_max %}
+                        <div style="min-width:80px;">
+                            <div class="progress" style="height:8px;border-radius:50px;">
+                                <div class="progress-bar bg-primary" id="albumProgressBar" style="width:0%;border-radius:50px;"></div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
                 {% endif %}
 
@@ -468,39 +490,78 @@ function cancelAlbumMode() {
     if (grid) grid.classList.remove('album-mode');
     albumModeBtn?.classList.remove('active');
     albumBar?.classList.remove('visible');
+    document.getElementById('albumCounter')?.classList.add('d-none');
     document.querySelectorAll('.photo-link').forEach(a => a.style.pointerEvents = '');
     updateBasket();
 }
 
 function updateAlbumCounter() {
     const n   = albumSelected.size;
+
+    // ── Floating bar ──────────────────────────────────────────────────
     const cnt = document.getElementById('albumCount');
     if (cnt) cnt.textContent = n;
 
     const lbl = document.getElementById('albumLimitLabel');
     if (lbl) {
-        if (ALBUM_MAX > 0) lbl.textContent = `/ ${ALBUM_MAX} max`;
+        if (ALBUM_MAX > 0)      lbl.textContent = `/ ${ALBUM_MAX}`;
         else if (ALBUM_MIN > 0) lbl.textContent = `(min ${ALBUM_MIN})`;
+        else                    lbl.textContent = '';
     }
 
-    const btn = document.getElementById('finishAlbumBtn');
-    const counterAlert = document.getElementById('albumCounter');
+    // ── Inline counter bar ────────────────────────────────────────────
+    const counterBox = document.getElementById('albumCounter');
+    const mainEl     = document.getElementById('albumCounterMain');
+    const subEl      = document.getElementById('albumCounterSub');
+    const progressEl = document.getElementById('albumProgressBar');
 
     let valid = true;
-    let msg = `${n} photo${n !== 1 ? 's' : ''} selected`;
-    if (ALBUM_MIN > 0 && n < ALBUM_MIN) { valid = false; msg += ` — need ${ALBUM_MIN - n} more`; }
-    if (ALBUM_MAX > 0 && n > ALBUM_MAX) { valid = false; msg += ` — remove ${n - ALBUM_MAX}`; }
+    let mainText = '';
+    let subText  = '';
 
-    if (btn) btn.disabled = !valid;
-    if (counterAlert) {
-        counterAlert.textContent = '';
-        const ico = document.createElement('i');
-        ico.className = 'bi bi-info-circle me-1';
-        counterAlert.appendChild(ico);
-        counterAlert.appendChild(document.createTextNode(msg));
-        counterAlert.classList.remove('d-none');
-        counterAlert.className = `alert py-2 small mb-3 alert-${valid ? 'info' : 'warning'}`;
+    if (ALBUM_MAX > 0 && ALBUM_MIN > 0) {
+        mainText = `${n} of ${ALBUM_MAX} photos selected`;
+        if (n < ALBUM_MIN)      { valid = false; subText = `Select ${ALBUM_MIN - n} more to continue (minimum ${ALBUM_MIN})`; }
+        else if (n > ALBUM_MAX) { valid = false; subText = `Remove ${n - ALBUM_MAX} photo${n - ALBUM_MAX > 1 ? 's' : ''} (maximum ${ALBUM_MAX})`; }
+        else                    { subText = n === ALBUM_MAX ? 'Maximum reached — tap Finish to save' : `Between ${ALBUM_MIN}–${ALBUM_MAX} required`; }
+    } else if (ALBUM_MAX > 0) {
+        mainText = `${n} / ${ALBUM_MAX} photos selected`;
+        if (n > ALBUM_MAX)  { valid = false; subText = `Remove ${n - ALBUM_MAX} photo${n - ALBUM_MAX > 1 ? 's' : ''}  (limit: ${ALBUM_MAX})`; }
+        else if (n === ALBUM_MAX) { subText = 'Limit reached — tap Finish to save'; }
+        else                      { subText = `You can select up to ${ALBUM_MAX - n} more`; }
+    } else if (ALBUM_MIN > 0) {
+        mainText = `${n} photo${n !== 1 ? 's' : ''} selected`;
+        if (n < ALBUM_MIN) { valid = false; subText = `Select at least ${ALBUM_MIN} (${ALBUM_MIN - n} more needed)`; }
+        else               { subText = `Minimum of ${ALBUM_MIN} met ✓`; }
+    } else {
+        mainText = `${n} photo${n !== 1 ? 's' : ''} selected`;
+        subText  = n === 0 ? 'Tap photos to add them to your album' : 'Tap Finish when done';
     }
+
+    if (mainEl) mainEl.textContent = mainText;
+    if (subEl)  subEl.textContent  = subText;
+
+    // Progress bar (only shown if max is set)
+    if (progressEl && ALBUM_MAX > 0) {
+        const pct = Math.min(100, Math.round(100 * n / ALBUM_MAX));
+        progressEl.style.width = pct + '%';
+        progressEl.className = 'progress-bar border-radius-50px ' +
+            (n > ALBUM_MAX ? 'bg-danger' : n >= ALBUM_MIN && ALBUM_MIN > 0 ? 'bg-success' : 'bg-primary');
+    }
+
+    // Box border colour
+    if (counterBox) {
+        const inner = counterBox.querySelector('div');
+        if (inner) {
+            inner.style.background    = valid ? '#f0f0ff' : '#fff8ec';
+            inner.style.borderColor   = valid ? '#c7c2fa' : '#f59e0b';
+        }
+        counterBox.classList.remove('d-none');
+    }
+
+    // Finish button
+    const btn = document.getElementById('finishAlbumBtn');
+    if (btn) btn.disabled = !valid;
 }
 
 function onCardClick(card, e) {

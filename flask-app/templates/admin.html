@@ -313,11 +313,11 @@
                             <i class="bi bi-camera-video text-white fs-1"></i>
                         </div>
                         {% else %}
-                        <a href="{{ url_for('uploaded_file', filename=p.photo_filename) }}" target="_blank"
-                           style="display:block;aspect-ratio:4/3;overflow:hidden;">
-                            <img src="{{ url_for('uploaded_file', filename=p.photo_filename) }}"
-                                 style="width:100%;height:100%;object-fit:cover;">
-                        </a>
+                        <div onclick="openSecureLightbox('{{ url_for('uploaded_file', filename=p.photo_filename, preview=1) }}')"
+                             style="display:block;aspect-ratio:4/3;overflow:hidden;cursor:zoom-in;">
+                            <img src="{{ url_for('uploaded_file', filename=p.photo_filename, thumb=1) }}"
+                                 style="width:100%;height:100%;object-fit:cover; pointer-events:none; user-select:none;" loading="lazy">
+                         </div>
                         {% endif %}
                         <div class="px-2 py-1">
                             <p class="mb-1 small text-truncate" title="{{ p.photo_filename }}">{{ p.photo_filename }}</p>
@@ -991,5 +991,59 @@ document.querySelectorAll('#adminTabs .nav-link').forEach(el => {
         history.replaceState(null, '', e.target.getAttribute('href'));
     });
 });
+
+</script>
+<div id="secureLightbox" class="d-none" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.95); z-index:9999; cursor:zoom-out; align-items:center; justify-content:center; flex-direction:column;" onclick="this.classList.add('d-none'); this.classList.remove('d-flex');">
+    <div class="spinner-border text-light position-absolute" id="lbSpinner" style="z-index:-1;"></div>
+    <img id="lbImage" src="" style="max-width:95vw; max-height:95vh; object-fit:contain; pointer-events:none; user-select:none; opacity:0; transition: opacity 0.3s;">
+</div>
+
+div id="secureLightbox" class="d-none" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.95); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
+    
+    <button onclick="closeSecureLightbox()" style="position:absolute; top:20px; right:30px; background:none; border:none; color:#fff; font-size:3rem; cursor:pointer; z-index:10000; line-height:1; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">
+        &times;
+    </button>
+
+    <div class="spinner-border text-light position-absolute" id="lbSpinner" style="z-index:-1;"></div>
+    
+    <div style="max-width:90vw; max-height:90vh; background:#000; border:1px solid #333; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative; box-shadow: 0 10px 40px rgba(0,0,0,0.7);">
+        <img id="lbImage" src="" style="max-width:100%; max-height:90vh; object-fit:contain; pointer-events:none; user-select:none; opacity:0; transition: opacity 0.3s;">
+    </div>
+</div>
+
+<script>
+function openSecureLightbox(url) {
+    const lb = document.getElementById('secureLightbox');
+    const img = document.getElementById('lbImage');
+    const spinner = document.getElementById('lbSpinner');
+    
+    img.style.opacity = '0';
+    spinner.style.display = 'block';
+    lb.classList.remove('d-none');
+    lb.classList.add('d-flex');
+    
+    img.onload = () => {
+        img.style.opacity = '1';
+        spinner.style.display = 'none';
+    };
+    img.src = url;
+}
+
+function closeSecureLightbox() {
+    const lb = document.getElementById('secureLightbox');
+    lb.classList.add('d-none');
+    lb.classList.remove('d-flex');
+    document.getElementById('lbImage').src = ''; // Clear memory
+}
+
+// Allow clicking the dark background (outside the frame) to close it too
+document.getElementById('secureLightbox').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeSecureLightbox();
+    }
+});
+
+// Block right-click on the entire lightbox area
+document.getElementById('secureLightbox').addEventListener('contextmenu', e => e.preventDefault());
 </script>
 {% endblock %}

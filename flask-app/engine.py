@@ -138,29 +138,51 @@ def create_highlight_preview(
     cache_dir: str,
     key: Optional[str] = None,
 ) -> str:
-    """Draw a semi-transparent purple face rectangle and save a cached preview."""
+    """Create a spotlight effect: darkened background with a feathered circular cutout over the face."""
     os.makedirs(cache_dir, exist_ok=True)
 
+    filename = f"verify_{key or uuid.uuid4().hex[:12]}.jpg"
+    out_path = os.path.join(cache_dir, filename)
+
+    if os.path.exists(out_path):
+        return filename
+
     top, right, bottom, left = face_location
-    top = int(max(0, top))
-    right = int(max(0, right))
-    bottom = int(max(0, bottom))
-    left = int(max(0, left))
+    top, right, bottom, left = max(0, top), max(0, right), max(0, bottom), max(0, left)
 
-    with Image.open(image_path).convert("RGBA") as base:
-        overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
+    from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
-        draw.rectangle(
-            [(left, top), (right, bottom)],
-            fill=(128, 0, 255, 75),
-            outline=(128, 0, 255, 220),
-            width=5,
-        )
+    try:
+        with Image.open(image_path) as img:
+            # 1. FIX ALIGNMENT: Auto-rotate iPhone/Smartphone photos correctly
+            img = ImageOps.exif_transpose(img)
+            
+            # 2. Match the AI's 1600px grid so the face coordinates align perfectly
+            img.thumbnail((1600, 1600))
+            base = img.convert("RGBA")
 
-        composed = Image.alpha_composite(base, overlay).convert("RGB")
-        filename = f"verify_{key or uuid.uuid4().hex[:12]}.jpg"
-        out_path = os.path.join(cache_dir, filename)
-        composed.save(out_path, format="JPEG", quality=90)
+            # 3. Create the dark overlay and feathered mask
+            overlay = Image.new("RGBA", base.size, (0, 0, 0, 180))
+            darkened_base = Image.alpha_composite(base, overlay)
+
+            mask = Image.new("L", base.size, 0)
+            draw = ImageDraw.Draw(mask)
+            
+            cx = (left + right) // 2
+            cy = (top + bottom) // 2
+            r = int(max(right - left, bottom - top) * 0.8)
+            
+            draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=255)
+            mask = mask.filter(ImageFilter.GaussianBlur(radius=r * 0.3))
+
+            composed = Image.composite(base, darkened_base, mask).convert("RGB")
+            
+            # 4. COMPRESSION FIX: Shrink the final popup to 800px so it loads instantly
+            composed.thumbnail((800, 800))
+            composed.save(out_path, format="JPEG", quality=75)
+            
+    except Exception as e:
+        print(f"Error generating preview: {e}")
+        return ""
 
     return filename

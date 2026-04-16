@@ -783,82 +783,49 @@ def _validate_selfie_quality(selfie_bytes):
 def find_matching_photos(selfie_bytes, event_id, user_id=None):
     img = _decode_selfie(selfie_bytes)
     img = _downscale_for_face_work(img)
-    encs = face_recognition.face_encodings(img)
+    
+    # Keeping the upgraded AI vision (Upsample & Jitter) so accuracy stays high
+    locations = face_recognition.face_locations(img, number_of_times_to_upsample=1, model="hog")
+    encs = face_recognition.face_encodings(img, known_face_locations=locations, num_jitters=2)
+    
     if not encs:
         return None
     selfie_enc = encs[0]
     BATCH = 2000
     matched = set()
-    candidate_by_photo = {}
-
-    handled_face_ids = set()
-    if user_id:
-        with get_db() as conn:
-            handled_rows = conn.execute(
-                "SELECT face_id FROM verification_feedback WHERE user_id=? AND event_id=?",
-                (user_id, event_id),
-            ).fetchall()
-        handled_face_ids = {int(r["face_id"]) for r in handled_rows}
 
     last_id = 0
     while True:
         with get_db() as conn:
             rows = conn.execute(
-                "SELECT id, photo_filename, encoding, top, right, bottom, left, verified_user_id "
+                "SELECT id, photo_filename, encoding "
                 "FROM faces WHERE event_id=? AND id>? ORDER BY id LIMIT ?",
                 (event_id, last_id, BATCH),
             ).fetchall()
         if not rows:
             break
+            
         filenames  = [r["photo_filename"] for r in rows]
         enc_matrix = np.array([pickle.loads(r["encoding"]) for r in rows], dtype=np.float64)
         distances  = face_recognition.face_distance(enc_matrix, selfie_enc)
+        
         for row, fname, dist in zip(rows, filenames, distances):
-            face_id = int(row["id"])
-            if user_id and (face_id in handled_face_ids or int(row["verified_user_id"] or 0) == int(user_id)):
-                continue
-
-            dist = float(dist)
-            if dist <= 0.45:
+            # ---------------------------------------------------------
+            # FULL AUTO MATH: Anything under 0.50 is automatically added to the gallery.
+            # If you find it is missing too many faces tomorrow, change this to 0.55.
+            # If it is adding the wrong people, change it to 0.45.
+            # ---------------------------------------------------------
+            if float(dist) <= 0.50:
                 matched.add(fname)
-                continue
-            if dist <= 0.60:
-                top = int(row["top"] or 0)
-                right = int(row["right"] or 0)
-                bottom = int(row["bottom"] or 0)
-                left = int(row["left"] or 0)
-                coords = (top, right, bottom, left)
-                try:
-                    preview_filename = create_highlight_preview(
-                        os.path.join(UPLOAD_FOLDER, fname),
-                        coords,
-                        cache_dir=VERIFICATION_CACHE_DIR,
-                        key=f"{event_id}_{row['id']}",
-                    )
-                except Exception:
-                    preview_filename = None
-
-                if not preview_filename:
-                    continue
-
-                existing = candidate_by_photo.get(fname)
-                if existing is None or dist < existing["distance"]:
-                    candidate_by_photo[fname] = {
-                        "face_id": face_id,
-                        "photo_filename": fname,
-                        "distance": dist,
-                        "event_id": int(event_id),
-                        "preview_filename": preview_filename,
-                    }
+                
         last_id = rows[-1]["id"]
 
-    verification_candidates = sorted(candidate_by_photo.values(), key=lambda c: c["distance"])[:8]
+    # Tell the frontend that verification is permanently disabled
     return {
         "matched": sorted(matched),
-        "needs_verification": bool(verification_candidates),
-        "verification_candidates": verification_candidates,
+        "needs_verification": False,
+        "verification_candidates": [],
     }
-
 
 @app.route("/validate-selfie", methods=["POST"])
 @login_required
@@ -1460,10 +1427,7 @@ def verify_match():
                 "UPDATE faces SET verified=1, verified_user_id=?, verified_at=CURRENT_TIMESTAMP WHERE id=?",
                 (uid, face_id),
             )
-            conn.execute(
-                "INSERT OR IGNORE INTO album_selections (user_id, event_id, photo_filename) VALUES (?,?,?)",
-                (uid, event_id, photo_filename),
-            )
+            ## FIX: Removed the automatic album insertion. It now goes to the normal gallery.
 
         conn.execute(
             "INSERT INTO verification_feedback (user_id, face_id, event_id, decision) VALUES (?,?,?,?) "
@@ -1520,16 +1484,37 @@ def album_submit():
 
 
 # ─── Secure file serving ───────────────────────────────────────────────────────
-
 @app.route("/uploads/<filename>")
 def uploaded_file(filename):
     filename = secure_filename(filename)
     filepath = os.path.join(UPLOAD_FOLDER, filename)
+    storage = get_storage()
+    file_exists_locally = os.path.exists(filepath)
 
-    if session.get("admin_id"):
-        if os.path.exists(filepath):
-            return send_from_directory(UPLOAD_FOLDER, filename)
-        storage = get_storage()
+    # 1. Authorization Check
+    is_admin = bool(session.get("admin_id"))
+    is_guest = bool(session.get("user_id"))
+
+    if not is_admin and not is_guest:
+        abort(403)
+
+    if not is_admin:
+        # Guest specific album check
+        matched = session.get("matched_photos", [])
+        uid = session.get("user_id")
+        in_album = False
+        if uid:
+            with get_db() as conn:
+                in_album = conn.execute(
+                    "SELECT id FROM album_selections WHERE user_id=? AND photo_filename=? LIMIT 1",
+                    (uid, filename)
+                ).fetchone() is not None
+
+        if filename not in matched and not in_album:
+            abort(403)
+
+    # 2. Handle Cloud Storage Fallback
+    if not file_exists_locally:
         if storage.mode == "S3_COMPATIBLE":
             try:
                 return redirect(storage.generate_private_url(filename, expires_seconds=300))
@@ -1537,14 +1522,40 @@ def uploaded_file(filename):
                 abort(404)
         abort(404)
 
-    if not session.get("user_id"):
-        abort(403)
+    # 3. Dynamic Generation (Thumbnails & 1080p Previews)
+    ext = filename.rsplit(".", 1)[-1].lower()
+    target_path = filepath
 
-    storage = get_storage()
-    file_exists_locally = os.path.exists(filepath)
+    req_thumb = request.args.get("thumb") == "1"
+    req_preview = request.args.get("preview") == "1"
 
-    if not file_exists_locally and storage.mode != "S3_COMPATIBLE":
-        abort(404)
+    # Intercept for Thumbnails (600px) OR Previews (1080p)
+    if (req_thumb or req_preview) and ext in ALLOWED_IMAGE_EXT and ext not in {"gif"}:
+        proxy_dir = os.path.join(UPLOAD_FOLDER, ".thumbnails" if req_thumb else ".previews")
+        os.makedirs(proxy_dir, exist_ok=True)
+        proxy_path = os.path.join(proxy_dir, filename)
+
+        # Build the proxy image if it doesn't exist yet
+        if not os.path.exists(proxy_path):
+            try:
+                from PIL import Image
+                with Image.open(filepath) as img:
+                    max_size = (600, 600) if req_thumb else (1920, 1080)
+                    img.thumbnail(max_size)
+                    img.convert("RGB").save(proxy_path, "JPEG", quality=85)
+            except Exception:
+                pass
+
+        if os.path.exists(proxy_path):
+            target_path = proxy_path
+
+    # 4. Serve the file (Apply watermark ONLY if it is a guest)
+    if not is_admin:
+        wm = get_watermark()
+        if ext in ALLOWED_IMAGE_EXT and ext not in {"gif"}:
+            return serve_image_with_watermark(target_path, wm)
+
+    return send_file(target_path)
 
     # Enforce guest authorization before serving local or signed cloud URL.
     matched = session.get("matched_photos", [])

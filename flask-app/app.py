@@ -2,6 +2,7 @@ import os
 import io
 import pickle
 import random
+import re
 import sqlite3
 import string
 import threading
@@ -45,7 +46,8 @@ app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-change-me")
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
 
 BASE_DIR      = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
+LEGACY_UPLOAD_FOLDER = os.path.join(BASE_DIR, "static", "uploads")
+UPLOAD_FOLDER = os.environ.get("UPLOAD_FOLDER") or os.path.join(BASE_DIR, "uploads")
 DB_PATH       = os.path.join(BASE_DIR, "faces.db")
 VERIFICATION_CACHE_DIR = os.path.join(BASE_DIR, "cache", "verification")
 
@@ -61,6 +63,7 @@ MAX_UPLOAD_BATCH_BYTES = int(os.environ.get("MAX_UPLOAD_BATCH_BYTES", str(1024 *
 FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(LEGACY_UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(VERIFICATION_CACHE_DIR, exist_ok=True)
 
 # ─── Background job tracker ────────────────────────────────────────────────────
@@ -381,7 +384,7 @@ def apply_watermark(pil_img: Image.Image, wm: dict) -> Image.Image:
     fsize     = max(10, min(200, int(wm.get("font_size", 48))))
     opacity   = max(0, min(100, int(wm.get("opacity", 60))))
     position  = wm.get("position", "bottom-right")
-    color_hex = (wm.get("color") or "#ffffff").lstrip("#").ljust(6, "0")
+    color_hex = _normalize_hex_color(wm.get("color"), default="#ffffff").lstrip("#")
 
     r = int(color_hex[0:2], 16)
     g = int(color_hex[2:4], 16)
@@ -481,6 +484,49 @@ def admin_required(f):
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _is_safe_redirect_target(target: str | None) -> bool:
+    if not target:
+        return False
+    return target.startswith("/") and not target.startswith("//")
+
+
+def _normalize_hex_color(value: str | None, default: str = "#ffffff") -> str:
+    if not value:
+        return default
+    raw = value.strip().lower()
+    if re.fullmatch(r"#?[0-9a-f]{6}", raw):
+        return f"#{raw.lstrip('#')}"
+    return default
+
+
+def _resolve_active_event_id() -> int | None:
+    event_code = (session.get("guest_event_code") or "").strip()
+    if not event_code:
+        return None
+    with get_db() as conn:
+        row = conn.execute("SELECT id FROM events WHERE code=?", (event_code,)).fetchone()
+    return row["id"] if row else None
+
+
+def _is_allowed_guest_photo(uid: int, event_id: int, filename: str) -> bool:
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT id FROM faces WHERE event_id=? AND photo_filename=? LIMIT 1",
+            (event_id, filename),
+        ).fetchone() is not None
+
+
+def _locate_uploaded_file(filename: str) -> str:
+    primary_path = os.path.join(UPLOAD_FOLDER, filename)
+    if os.path.exists(primary_path):
+        return primary_path
+    legacy_path = os.path.join(LEGACY_UPLOAD_FOLDER, filename)
+    if os.path.exists(legacy_path):
+        return legacy_path
+    return primary_path
+
 
 def is_video(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_VIDEO_EXT
@@ -886,7 +932,8 @@ def login():
             session.clear()
             session.update(user_id=user["id"], user_name=user["name"], user_email=user["email"])
             flash(f"Welcome back, {user['name']}!", "success")
-            return redirect(request.args.get("next") or url_for("guest"))
+            next_target = request.args.get("next")
+            return redirect(next_target if _is_safe_redirect_target(next_target) else url_for("guest"))
         flash("Invalid email or password.", "danger")
     return render_template("login.html")
 
@@ -1218,7 +1265,7 @@ def save_watermark():
     font_size = request.form.get("font_size", 48, type=int)
     opacity   = request.form.get("opacity", 60, type=int)
     position  = request.form.get("position", "bottom-right")
-    color     = request.form.get("color", "#ffffff")
+    color     = _normalize_hex_color(request.form.get("color", "#ffffff"))
 
     with get_db() as conn:
         conn.execute(
@@ -1368,8 +1415,9 @@ def guest():
                             verification_candidates = result.get("verification_candidates", [])
                             searched = True
                             session["matched_photos"] = matched
-                    except Exception as exc:
-                        error_msg = f"Processing error: {exc}"
+                    except Exception:
+                        app.logger.exception("Selfie processing failed")
+                        error_msg = "Could not process the selfie right now. Please try again."
 
     return render_template("find_my_photos.html",
         name=session.get("user_name", ""),
@@ -1449,45 +1497,64 @@ def verify_match():
 def album_submit():
     """Guest submits their album photo selection."""
     data = request.get_json(silent=True) or {}
-    event_id  = data.get("event_id")
+    payload_event_id = data.get("event_id")
     filenames = data.get("filenames", [])
-    uid       = session.get("user_id")
+    uid = session.get("user_id")
 
-    if not event_id or not uid:
+    active_event_id = _resolve_active_event_id()
+    try:
+        payload_event_id = int(payload_event_id)
+    except Exception:
+        payload_event_id = None
+
+    if not uid or not payload_event_id or not active_event_id:
         return jsonify({"ok": False, "msg": "Missing data"}), 400
+    if payload_event_id != active_event_id:
+        return jsonify({"ok": False, "msg": "Event mismatch"}), 403
+
+    normalized_filenames = []
+    seen = set()
+    for raw_name in filenames:
+        fname = secure_filename((raw_name or "").strip())
+        if fname and fname not in seen:
+            seen.add(fname)
+            normalized_filenames.append(fname)
 
     with get_db() as conn:
-        event = conn.execute("SELECT * FROM events WHERE id=?", (event_id,)).fetchone()
+        event = conn.execute("SELECT * FROM events WHERE id=?", (active_event_id,)).fetchone()
         if not event:
             return jsonify({"ok": False, "msg": "Event not found"}), 404
+
+        allowed = set(session.get("matched_photos", []))
+        valid_filenames = [
+            fname for fname in normalized_filenames
+            if fname in allowed and _is_allowed_guest_photo(uid, active_event_id, fname)
+        ]
 
         album_min = event["album_min"] or 0
         album_max = event["album_max"] or 0
 
-        if album_min and len(filenames) < album_min:
+        if album_min and len(valid_filenames) < album_min:
             return jsonify({"ok": False, "msg": f"Select at least {album_min} photos."}), 400
-        if album_max and len(filenames) > album_max:
+        if album_max and len(valid_filenames) > album_max:
             return jsonify({"ok": False, "msg": f"Maximum {album_max} photos allowed."}), 400
 
-        # Replace previous selection
-        conn.execute("DELETE FROM album_selections WHERE user_id=? AND event_id=?", (uid, event_id))
-        for fname in filenames:
-            fname = secure_filename(fname)
-            if fname:
-                conn.execute(
-                    "INSERT OR IGNORE INTO album_selections (user_id, event_id, photo_filename) VALUES (?,?,?)",
-                    (uid, event_id, fname)
-                )
+        conn.execute("DELETE FROM album_selections WHERE user_id=? AND event_id=?", (uid, active_event_id))
+        for fname in valid_filenames:
+            conn.execute(
+                "INSERT OR IGNORE INTO album_selections (user_id, event_id, photo_filename) VALUES (?,?,?)",
+                (uid, active_event_id, fname)
+            )
         conn.commit()
 
-    return jsonify({"ok": True, "count": len(filenames)})
+    return jsonify({"ok": True, "count": len(valid_filenames)})
 
 
 # ─── Secure file serving ───────────────────────────────────────────────────────
 @app.route("/uploads/<filename>")
 def uploaded_file(filename):
     filename = secure_filename(filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    filepath = _locate_uploaded_file(filename)
     storage = get_storage()
     file_exists_locally = os.path.exists(filepath)
 
@@ -1499,18 +1566,22 @@ def uploaded_file(filename):
         abort(403)
 
     if not is_admin:
-        # Guest specific album check
-        matched = session.get("matched_photos", [])
         uid = session.get("user_id")
-        in_album = False
-        if uid:
-            with get_db() as conn:
-                in_album = conn.execute(
-                    "SELECT id FROM album_selections WHERE user_id=? AND photo_filename=? LIMIT 1",
-                    (uid, filename)
-                ).fetchone() is not None
+        active_event_id = _resolve_active_event_id()
+        if not uid or not active_event_id:
+            abort(403)
 
-        if filename not in matched and not in_album:
+        matched = set(session.get("matched_photos", []))
+        matched_allowed = filename in matched and _is_allowed_guest_photo(uid, active_event_id, filename)
+
+        in_album = False
+        with get_db() as conn:
+            in_album = conn.execute(
+                "SELECT id FROM album_selections WHERE user_id=? AND event_id=? AND photo_filename=? LIMIT 1",
+                (uid, active_event_id, filename)
+            ).fetchone() is not None
+
+        if not matched_allowed and not in_album:
             abort(403)
 
     # 2. Handle Cloud Storage Fallback
@@ -1556,36 +1627,6 @@ def uploaded_file(filename):
             return serve_image_with_watermark(target_path, wm)
 
     return send_file(target_path)
-
-    # Enforce guest authorization before serving local or signed cloud URL.
-    matched = session.get("matched_photos", [])
-    uid = session.get("user_id")
-    in_album = False
-    if uid:
-        with get_db() as conn:
-            in_album = conn.execute(
-                "SELECT id FROM album_selections WHERE user_id=? AND photo_filename=? LIMIT 1",
-                (uid, filename)
-            ).fetchone() is not None
-
-    if filename not in matched and not in_album:
-        abort(403)
-
-    if not file_exists_locally and storage.mode == "S3_COMPATIBLE":
-        try:
-            return redirect(storage.generate_private_url(filename, expires_seconds=300))
-        except Exception:
-            abort(404)
-
-    if not file_exists_locally:
-        abort(404)
-
-    # Apply watermark for guests
-    wm = get_watermark()
-    ext = filename.rsplit(".", 1)[-1].lower()
-    if ext in ALLOWED_IMAGE_EXT and ext not in {"gif"}:
-        return serve_image_with_watermark(filepath, wm)
-    return send_from_directory(UPLOAD_FOLDER, filename)
 
 
 def _handle_ftp_new_image(path: str):

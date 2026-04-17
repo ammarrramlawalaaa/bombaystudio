@@ -660,7 +660,10 @@ if (photosInput) {
         fileListEl.innerHTML = '';
         Array.from(files).forEach(f => {
             const li = document.createElement('li');
-            li.innerHTML = `<i class="bi bi-${f.type.startsWith('video') ? 'camera-video' : 'image'} me-1"></i>${f.name}`;
+            const icon = document.createElement('i');
+            icon.className = `bi bi-${f.type.startsWith('video') ? 'camera-video' : 'image'} me-1`;
+            li.appendChild(icon);
+            li.appendChild(document.createTextNode(f.name));
             fileListEl.appendChild(li);
         });
         fileListEl.classList.remove('d-none');
@@ -821,7 +824,14 @@ function renderProgressState(data) {
     if (ct) ct.textContent = `${data.done || 0}/${data.total || 0} files`;
     if (data.errors && data.errors.length) {
         const el = document.getElementById('jobErrors');
-        if (el) el.innerHTML = data.errors.map(e => `<li>⚠ ${e}</li>`).join('');
+        if (el) {
+            el.textContent = '';
+            data.errors.forEach((errText) => {
+                const li = document.createElement('li');
+                li.textContent = `⚠ ${errText}`;
+                el.appendChild(li);
+            });
+        }
     }
     if (data.status === 'complete' && bar) {
         bar.classList.remove('progress-bar-striped', 'progress-bar-animated');
@@ -993,19 +1003,14 @@ document.querySelectorAll('#adminTabs .nav-link').forEach(el => {
 });
 
 </script>
-<div id="secureLightbox" class="d-none" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.95); z-index:9999; cursor:zoom-out; align-items:center; justify-content:center; flex-direction:column;" onclick="this.classList.add('d-none'); this.classList.remove('d-flex');">
-    <div class="spinner-border text-light position-absolute" id="lbSpinner" style="z-index:-1;"></div>
-    <img id="lbImage" src="" style="max-width:95vw; max-height:95vh; object-fit:contain; pointer-events:none; user-select:none; opacity:0; transition: opacity 0.3s;">
-</div>
+<div id="secureLightbox" class="d-none" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.95); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
 
-div id="secureLightbox" class="d-none" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.95); z-index:9999; align-items:center; justify-content:center; flex-direction:column;">
-    
     <button onclick="closeSecureLightbox()" style="position:absolute; top:20px; right:30px; background:none; border:none; color:#fff; font-size:3rem; cursor:pointer; z-index:10000; line-height:1; opacity:0.8; transition:opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">
         &times;
     </button>
 
     <div class="spinner-border text-light position-absolute" id="lbSpinner" style="z-index:-1;"></div>
-    
+
     <div style="max-width:90vw; max-height:90vh; background:#000; border:1px solid #333; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative; box-shadow: 0 10px 40px rgba(0,0,0,0.7);">
         <img id="lbImage" src="" style="max-width:100%; max-height:90vh; object-fit:contain; pointer-events:none; user-select:none; opacity:0; transition: opacity 0.3s;">
     </div>
